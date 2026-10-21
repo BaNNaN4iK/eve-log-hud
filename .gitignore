@@ -1,0 +1,30 @@
+# личные данные и настройки — в репозиторий не попадают
+config.json
+sessions.jsonl
+history.csv
+state.json
+esi_cache.json
+prices.json
+aa_outbox.json
+overlay.json
+overlay_session.json
+app.json
+esi_token.json
+fleets/
+appraisals/
+fleet_names.json
+*.bak-*
+unparsed.txt
+watcher.log*
+watcher.pid
+stop.flag
+cache/
+webview/
+data/
+
+# сборка
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc

@@ -1,0 +1,1582 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>EVE Log Watcher</title>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --panel2:#f0f2f5; --text:#16191d; --muted:#5d6571; --line:#dde1e6;
+  --accent:#2f6fde; --accent-text:#ffffff; --focus:#e08a00;
+  --c-out:#2f6fde; --c-in:#d4483b; --c-ore:#b7791f; --c-bounty:#2f8f4e; --c-min:#7a5bd6; --c-refl:#8a94a3;
+  --good:#2f8f4e; --warn:#b7791f; --bad:#d4483b;
+  --sec-hi:#2f8f4e; --sec-lo:#c27c0e; --sec-null:#d4483b;
+  --shadow:0 1px 2px rgba(0,0,0,.06),0 1px 8px rgba(0,0,0,.04);
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1216; --panel:#181c22; --panel2:#20252d; --text:#e6e9ee; --muted:#9aa3af; --line:#2b313a;
+    --accent:#5b93f5; --accent-text:#0b0e12; --focus:#ffb547;
+    --c-out:#5b93f5; --c-in:#f06a5d; --c-ore:#e3a63e; --c-bounty:#4fbf74; --c-min:#a58cf0; --c-refl:#7d8794;
+    --good:#4fbf74; --warn:#e3a63e; --bad:#f06a5d;
+    --sec-hi:#4fbf74; --sec-lo:#e3a63e; --sec-null:#f06a5d;
+    --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1216; --panel:#181c22; --panel2:#20252d; --text:#e6e9ee; --muted:#9aa3af; --line:#2b313a;
+  --accent:#5b93f5; --accent-text:#0b0e12; --focus:#ffb547;
+  --c-out:#5b93f5; --c-in:#f06a5d; --c-ore:#e3a63e; --c-bounty:#4fbf74; --c-min:#a58cf0; --c-refl:#7d8794;
+  --good:#4fbf74; --warn:#e3a63e; --bad:#f06a5d;
+  --sec-hi:#4fbf74; --sec-lo:#e3a63e; --sec-null:#f06a5d;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+a{color:var(--accent)}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1280px;margin:0 auto;padding:0 16px 48px}
+header.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 0 6px}
+header.top h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:var(--panel2);color:var(--muted);font-size:12.5px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.ok{background:var(--good)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+.spacer{flex:1}
+.bar{position:sticky;top:0;z-index:5;background:var(--bg);padding:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;flex-wrap:wrap;background:var(--panel2);border-radius:8px;padding:2px}
+.seg button{border:0;background:transparent;padding:6px 10px;border-radius:6px;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--text);box-shadow:var(--shadow);font-weight:600}
+select,input[type=date]{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px;min-height:32px}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);padding:6px 12px;border-radius:8px;cursor:pointer;text-decoration:none;color:var(--text);min-height:32px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+nav.tabs{display:flex;gap:2px;overflow-x:auto;margin:12px 0 0;border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.tabs button{border:0;background:none;padding:9px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+.badge{display:inline-block;min-width:18px;padding:0 6px;border-radius:9px;background:var(--panel2);font-size:11.5px;text-align:center;margin-left:4px}
+.badge.warn{background:var(--warn);color:#000}
+section.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-top:14px;box-shadow:var(--shadow);min-width:0}
+section.panel>h2{font-size:15px;margin:0 0 10px;font-weight:650;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+h3{font-size:13.5px;margin:14px 0 8px;font-weight:650}
+.muted{color:var(--muted)} .small{font-size:12.5px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.tile{background:var(--panel2);border-radius:8px;padding:10px 12px;min-width:0}
+.tile .k{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile.out .v{color:var(--c-out)} .tile.in .v{color:var(--c-in)} .tile.ore .v{color:var(--c-ore)} .tile.bounty .v{color:var(--c-bounty)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+.grid2>section.panel{margin-top:0}
+.gridgap{margin-top:14px}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{font-weight:600;color:var(--muted);font-size:12.5px;position:relative}
+th:first-child,td:first-child{text-align:left}
+td.l,th.l{text-align:left}
+td.name{max-width:280px;overflow:hidden;text-overflow:ellipsis}
+th.sort{cursor:pointer;user-select:none}
+th.sort[aria-sort="ascending"]::after{content:" ▲";font-size:10px}
+th.sort[aria-sort="descending"]::after{content:" ▼";font-size:10px}
+tbody tr.click{cursor:pointer}
+tbody tr.click:hover{background:var(--panel2)}
+tbody tr.click:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+tr.short td{color:var(--muted)}
+.ico{width:22px;height:22px;vertical-align:middle;margin-right:6px;border-radius:3px}
+.cat{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;background:var(--panel2);color:var(--muted);margin-left:6px}
+.sec{font-weight:650;font-variant-numeric:tabular-nums}
+.sec.hi{color:var(--sec-hi)} .sec.lo{color:var(--sec-lo)} .sec.null{color:var(--sec-null)}
+.qbar{display:inline-flex;width:110px;height:10px;border-radius:3px;overflow:hidden;vertical-align:middle;background:var(--panel2)}
+.qbar span{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;color:var(--muted);margin:6px 0 0}
+.qhelp{position:relative;cursor:help;border-bottom:1px dotted var(--muted);outline:0}
+.qhelp.qnote{border:1px solid var(--line);border-radius:50%;width:16px;height:16px;line-height:14px;text-align:center;font-size:11px}
+.qhelp:hover::after,.qhelp:focus::after{content:attr(data-tip);position:absolute;left:0;bottom:calc(100% + 6px);width:max-content;max-width:280px;white-space:normal;background:var(--panel);color:var(--text,inherit);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.35;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:5;text-align:left}
+.legend .qhelp:nth-last-child(-n+4):hover::after,.legend .qhelp:nth-last-child(-n+4):focus::after{left:auto;right:0}
+.qhelp.qnote:hover::after,.qhelp.qnote:focus::after{max-width:320px;line-height:1.35}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.chart{position:relative;width:100%;min-height:60px}
+.chart svg{display:block;overflow:visible}
+.chart text{fill:var(--muted);font-size:11px}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .axis{stroke:var(--line)}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.15);white-space:nowrap;z-index:10;display:none}
+.empty{padding:22px;text-align:center;color:var(--muted)}
+.live-card{border-left:3px solid var(--c-out);padding-left:12px;margin-bottom:14px}
+.live-card:last-child{margin-bottom:0}
+.live-head{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:8px}
+.live-head b{font-size:15px}
+.notice{padding:10px 12px;border-radius:8px;background:var(--panel2);margin-top:10px;font-size:13px}
+.notice.warn{border-left:3px solid var(--warn)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.controls label{display:inline-flex;align-items:center;gap:6px}
+.hidden{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+dialog{border:1px solid var(--line);border-radius:12px;padding:0;background:var(--bg);color:var(--text);width:min(1100px,calc(100vw - 16px));max-height:calc(100vh - 16px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.dlg-head{position:sticky;top:0;background:var(--bg);display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);z-index:4}
+.dlg-head h2{margin:0;font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dlg-body{padding:0 14px 16px}
+code,.mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+.unp td.l{white-space:normal;word-break:break-word;text-align:left}
+footer{margin-top:26px;color:var(--muted);font-size:12px}
+@media (max-width:520px){
+  .wrap{padding:0 10px 40px}
+  .tile .v{font-size:17px}
+  .grid2{grid-template-columns:minmax(0,1fr)}
+  section.panel{padding:12px 10px}
+  th,td{padding:5px 6px}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+<script>
+// тема до первой отрисовки, чтобы страница не мигала светлым: сохранённый выбор, иначе тёмная
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('elw.theme'); } catch (e) { }
+  document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+})();
+</script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>EVE Log Watcher</h1>
+    <span class="pill" id="status" role="status" aria-live="polite"><span class="dot"></span><span>подключение…</span></span>
+    <span class="spacer"></span>
+    <span class="small muted" id="updated"></span>
+    <button type="button" class="btn" id="themeBtn" aria-label="Переключить тему"></button>
+  </header>
+
+  <div class="bar" role="group" aria-label="Фильтры">
+    <div class="seg" id="periodSeg" role="group" aria-label="Период">
+      <button type="button" data-p="today">Сегодня</button>
+      <button type="button" data-p="d7">7 дней</button>
+      <button type="button" data-p="d30">30 дней</button>
+      <button type="button" data-p="all">Всё время</button>
+      <button type="button" data-p="custom">Даты…</button>
+    </div>
+    <span id="customDates" class="hidden">
+      <label class="sr" for="dFrom">С даты</label><input type="date" id="dFrom">
+      <span class="muted">—</span>
+      <label class="sr" for="dTo">По дату</label><input type="date" id="dTo">
+    </span>
+    <label id="whoWrap" class="hidden"><span class="sr">Персонаж</span>
+      <select id="who" aria-label="Персонаж"><option value="">Все персонажи</option></select>
+    </label>
+    <span class="spacer"></span>
+    <a class="btn" href="/history.csv" download>Скачать CSV</a>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Разделы" id="tabs">
+    <button role="tab" type="button" data-tab="overview" id="tab-overview" aria-controls="view-overview">Обзор</button>
+    <button role="tab" type="button" data-tab="combat" id="tab-combat" aria-controls="view-combat">Бой</button>
+    <button role="tab" type="button" data-tab="mining" id="tab-mining" aria-controls="view-mining">Добыча</button>
+    <button role="tab" type="button" data-tab="bounty" id="tab-bounty" aria-controls="view-bounty">Баунти</button>
+    <button role="tab" type="button" data-tab="sessions" id="tab-sessions" aria-controls="view-sessions">Сессии</button>
+    <button role="tab" type="button" data-tab="unparsed" id="tab-unparsed" aria-controls="view-unparsed">Нераспознанное <span class="badge" id="unpBadge">0</span></button>
+    <button role="tab" type="button" data-tab="modules" id="tab-modules" aria-controls="view-modules">Модули <span class="badge warn hidden" id="updBadge" title="Есть обновления">0</span></button>
+  </nav>
+
+  <main>
+    <div role="tabpanel" id="view-overview" aria-labelledby="tab-overview">
+      <section class="panel" aria-labelledby="h-live">
+        <h2 id="h-live">Сейчас</h2>
+        <div id="live"></div>
+      </section>
+      <section class="panel" aria-labelledby="h-totals">
+        <h2 id="h-totals">Итоги за период <span class="muted small" id="periodLabel"></span></h2>
+        <div class="tiles" id="totals"></div>
+      </section>
+      <section class="panel" aria-labelledby="h-chart">
+        <h2 id="h-chart">По времени
+          <label><span class="sr">Метрика графика</span>
+            <select id="metric" aria-label="Метрика графика">
+              <option value="out">Нанесённый урон</option>
+              <option value="in">Полученный урон</option>
+              <option value="bounty">Баунти, ISK</option>
+              <option value="ore">Руда, ед.</option>
+              <option value="ore_m3">Руда, м³</option>
+              <option value="ore_isk">Стоимость руды, ISK</option>
+              <option value="minutes">Минуты в игре</option>
+            </select>
+          </label>
+        </h2>
+        <div class="chart" id="mainChart"></div>
+      </section>
+      <div class="grid2 gridgap">
+        <section class="panel" aria-labelledby="h-ow"><h2 id="h-ow">Оружие — топ</h2><div id="ovWeapons"></div></section>
+        <section class="panel" aria-labelledby="h-oo"><h2 id="h-oo">Руда — топ</h2><div id="ovOre"></div></section>
+      </div>
+      <section class="panel" aria-labelledby="h-os"><h2 id="h-os">Системы</h2><div id="ovSystems"></div></section>
+    </div>
+
+    <div role="tabpanel" id="view-combat" aria-labelledby="tab-combat" class="hidden">
+      <section class="panel"><h2>Нанесённый урон</h2><div class="tiles" id="cTiles"></div></section>
+      <section class="panel"><h2>Оружие</h2>
+        <p class="small muted" style="margin:0 0 8px">Лог не различает отдельные модули: одинаковые орудия объединяются в одну строку, а у ракет вместо пусковой установки указан тип ракеты. DPS считается по времени работы оружия (от первого до последнего выстрела в каждой сессии), пиковый — лучшие 30 секунд.</p>
+        <div id="cWeapons"></div>
+      </section>
+      <section class="panel"><h2>Цели</h2><div id="cTargets"></div></section>
+      <div class="grid2 gridgap">
+        <section class="panel"><h2>Кто стрелял по вам</h2><div id="cAttackers"></div></section>
+        <section class="panel"><h2>Чем по вам стреляли</h2><div id="cInWeapons"></div></section>
+      </div>
+      <div class="grid2 gridgap">
+        <section class="panel"><h2>Ремонт</h2><div id="cReps"></div></section>
+        <section class="panel"><h2>Нейтрализация и РЭБ</h2><div id="cEwar"></div></section>
+      </div>
+    </div>
+
+    <div role="tabpanel" id="view-mining" aria-labelledby="tab-mining" class="hidden">
+      <section class="panel"><h2>Цены руды</h2>
+        <div class="controls">
+          <label>Цена:
+            <select id="priceMode" aria-label="Режим цены">
+              <option value="buy">Jita — макс. buy-ордер</option>
+              <option value="sell">Jita — мин. sell-ордер</option>
+              <option value="avg">Средняя по рынку (ESI)</option>
+            </select>
+          </label>
+          <button type="button" class="btn primary" id="priceBtn">Обновить цены</button>
+          <span class="small muted" id="priceStatus" role="status" aria-live="polite"></span>
+        </div>
+        <div class="small muted">«Если продать сейчас» — сумма при продаже всего объёма в buy-ордера станции Jita IV - Moon 4 сверху вниз по стакану (верхний ордер может быть меньше вашего объёма).</div>
+      </section>
+      <section class="panel"><h2>Итого</h2><div class="tiles" id="mTiles"></div></section>
+      <section class="panel"><h2>Руда по типам</h2><div id="mOre"></div></section>
+      <section class="panel"><h2>По дням <span class="small muted">м³</span></h2><div class="chart" id="mChart"></div></section>
+      <section class="panel"><h2>По системам</h2><div id="mSystems"></div></section>
+    </div>
+
+    <div role="tabpanel" id="view-bounty" aria-labelledby="tab-bounty" class="hidden">
+      <section class="panel"><h2>Итого</h2><div class="tiles" id="bTiles"></div></section>
+      <section class="panel"><h2>По дням</h2><div class="chart" id="bChart"></div></section>
+      <div class="grid2 gridgap">
+        <section class="panel"><h2>По системам</h2><div id="bSystems"></div></section>
+        <section class="panel"><h2>Лучшие сессии</h2><div id="bTop"></div></section>
+      </div>
+    </div>
+
+    <div role="tabpanel" id="view-sessions" aria-labelledby="tab-sessions" class="hidden">
+      <section class="panel"><h2>Сессии <span class="small muted" id="sessCount"></span>
+        <label class="small" style="margin-left:auto;font-weight:400"><input type="checkbox" id="showShort"> показывать короткие</label></h2>
+        <div id="sessTable"></div>
+      </section>
+    </div>
+
+    <div role="tabpanel" id="view-unparsed" aria-labelledby="tab-unparsed" class="hidden">
+      <section class="panel"><h2>Нераспознанные строки</h2>
+        <p class="small muted" style="margin-top:0">Строки боя, добычи и баунти, формат которых приложение пока не знает. Они не теряются: учитываются в сессии и попадают сюда. Чтобы научить приложение новому формату (например, исходящий ремонт брони или исходящие нейты), скопируйте примеры и пришлите разработчику.</p>
+        <div class="controls"><button type="button" class="btn" id="copyUnp">Скопировать всё</button><span class="small muted" id="copyMsg" role="status" aria-live="polite"></span></div>
+        <div id="unpTable"></div>
+      </section>
+    </div>
+    <div role="tabpanel" id="view-modules" aria-labelledby="tab-modules" class="hidden">
+      <section class="panel"><h2>Модули</h2>
+        <p class="small muted" style="margin-top:0">Каждая возможность приложения — отдельный модуль. Выключенный модуль не запускается и не показывает свою вкладку.
+          Установить модуль — положить его папку в папку модулей, удалить — убрать папку. Изменения вступают в силу после перезапуска.</p>
+        <div id="updBox" class="controls" style="margin:0 0 10px"></div>
+        <div id="modList"></div>
+        <div class="controls"><span class="small muted" id="modMsg" role="status" aria-live="polite"></span></div>
+      </section>
+    </div>
+  </main>
+
+  <footer id="footer"></footer>
+</div>
+
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <div class="dlg-head"><h2 id="dlgTitle">Сессия</h2><button type="button" class="btn" id="dlgClose">Закрыть</button></div>
+  <div class="dlg-body" id="dlgBody"></div>
+</dialog>
+<div class="tip" id="tip" role="presentation"></div>
+
+<script id="logic">
+/* LOGIC-START — чистые функции без DOM; тестируются в Node (tests/dashboard_logic.test.js) */
+var L = (function () {
+  'use strict';
+  var NB = ' ';
+  var MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  function grp(s) { return s.replace(/\B(?=(\d{3})+(?!\d))/g, NB); }
+  function bad(n) { return n === null || n === undefined || typeof n !== 'number' || !isFinite(n); }
+  function fmtInt(n) { if (bad(n)) return '—'; var r = Math.round(n); return (r < 0 ? '−' : '') + grp(String(Math.abs(r))); }
+  function fmtNum(n, d) {
+    if (bad(n)) return '—';
+    d = d === undefined ? 1 : d;
+    var s = Math.abs(n).toFixed(d), p = s.split('.'), frac = p[1] ? p[1].replace(/0+$/, '') : '';
+    var neg = n < 0 && (+s !== 0);
+    return (neg ? '−' : '') + grp(p[0]) + (frac ? ',' + frac : '');
+  }
+  function fmtCompact(n) {
+    if (bad(n)) return '—';
+    var a = Math.abs(n);
+    if (a >= 1e12) return fmtNum(n / 1e12, 2) + NB + 'трлн';
+    if (a >= 1e9) return fmtNum(n / 1e9, 2) + NB + 'млрд';
+    if (a >= 1e6) return fmtNum(n / 1e6, 2) + NB + 'млн';
+    if (a >= 1e4) return fmtNum(n / 1e3, 1) + NB + 'тыс.';
+    return fmtInt(n);
+  }
+  function fmtIsk(n) { return bad(n) ? '—' : fmtCompact(n) + NB + 'ISK'; }
+  function fmtPct(x) { return bad(x) ? '—' : fmtNum(x * 100, x < 0.1 ? 1 : 0) + '%'; }
+  function fmtDur(sec) {
+    sec = Math.max(0, Math.round(sec || 0));
+    var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    if (h) return h + NB + 'ч' + (m ? ' ' + (m < 10 ? '0' : '') + m + NB + 'мин' : '');
+    if (m) return m + NB + 'мин' + (s && m < 10 ? ' ' + s + NB + 'с' : '');
+    return s + NB + 'с';
+  }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtTime(ts) { var d = new Date(ts * 1000); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function fmtTimeS(ts) { var d = new Date(ts * 1000); return fmtTime(ts) + ':' + pad(d.getSeconds()); }
+  function fmtDate(ts) { var d = new Date(ts * 1000); return pad(d.getDate()) + '.' + pad(d.getMonth() + 1); }
+  function fmtDateFull(ts) { return fmtDate(ts) + '.' + new Date(ts * 1000).getFullYear(); }
+  function fmtDateTime(ts) { return fmtDate(ts) + ' ' + fmtTime(ts); }
+  function dayStart(ts) { var d = new Date(ts * 1000); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000; }
+  function addDays(ts, n) { var d = new Date(ts * 1000); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime() / 1000; }
+  function parseDateInput(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() / 1000 : null;
+  }
+  function toDateInput(ts) { var d = new Date(ts * 1000); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function unitFor(from, to) {
+    var days = (to - from) / 86400;
+    if (days <= 1.05) return 'hour';
+    if (days <= 120) return 'day';
+    if (days <= 730) return 'week';
+    return 'month';
+  }
+  /** Период -> {from, to, unit}; границы — локальная полночь браузера, to не включается. */
+  function periodRange(key, now, opts) {
+    opts = opts || {};
+    var today = dayStart(now), tomorrow = addDays(today, 1), f, t;
+    if (key === 'today') return { from: today, to: tomorrow, unit: 'hour' };
+    if (key === 'd7') return { from: addDays(today, -6), to: tomorrow, unit: 'day' };
+    if (key === 'd30') return { from: addDays(today, -29), to: tomorrow, unit: 'day' };
+    if (key === 'custom') {
+      f = parseDateInput(opts.from); t = parseDateInput(opts.to);
+      if (f === null) f = addDays(today, -29);
+      if (t === null) t = today;
+      if (t < f) { var x = f; f = t; t = x; }
+      t = addDays(t, 1);
+      return { from: f, to: t, unit: unitFor(f, t) };
+    }
+    f = opts.minTs !== undefined && opts.minTs !== null ? Math.min(dayStart(opts.minTs), addDays(today, -6)) : addDays(today, -29);
+    return { from: f, to: tomorrow, unit: unitFor(f, tomorrow) };
+  }
+  function bucketStarts(r) {
+    var out = [], t, guard = 0;
+    if (r.unit === 'hour') {
+      var d0 = new Date(r.from * 1000);
+      for (var h = 0; ; h++) {
+        t = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), d0.getHours() + h).getTime() / 1000;
+        if (t >= r.to || ++guard > 2000) break;
+        out.push(t);
+      }
+    } else if (r.unit === 'day') {
+      for (t = r.from; t < r.to && ++guard < 5000; t = addDays(t, 1)) out.push(t);
+    } else if (r.unit === 'week') {
+      var wd = (new Date(r.from * 1000).getDay() + 6) % 7;
+      for (t = addDays(r.from, -wd); t < r.to && ++guard < 2000; t = addDays(t, 7)) out.push(t);
+    } else {
+      var d = new Date(r.from * 1000), y = d.getFullYear(), mo = d.getMonth();
+      for (; ++guard < 1000; mo++) {
+        t = new Date(y, mo, 1).getTime() / 1000;
+        if (t >= r.to) break;
+        out.push(t);
+      }
+    }
+    return out;
+  }
+  function bucketLabel(t, unit) {
+    var d = new Date(t * 1000);
+    if (unit === 'hour') return pad(d.getHours());
+    if (unit === 'month') return MONTHS[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2);
+    return fmtDate(t);
+  }
+  function inFilter(s, f) { return s.t0 >= f.from && s.t0 < f.to && (!f.who || s.who === f.who); }
+  function filterSessions(list, f) { return list.filter(function (s) { return inFilter(s, f); }); }
+  function oreSum(ore, ctx, kind) {
+    var t = 0;
+    for (var k in (ore || {})) {
+      var v = kind === 'm3' ? (ctx && ctx.volumeOf ? ctx.volumeOf(k) : null) : (ctx && ctx.priceOf ? ctx.priceOf(k) : null);
+      if (v !== null && v !== undefined) t += ore[k] * v;
+    }
+    return t;
+  }
+  function metricValue(s, metric, ctx) {
+    switch (metric) {
+      case 'out': return s.out || 0;
+      case 'in': return s.in || 0;
+      case 'bounty': return s.bounty || 0;
+      case 'ore': return s.ore_total || 0;
+      case 'ore_m3': return oreSum(s.ore, ctx, 'm3');
+      case 'ore_isk': return oreSum(s.ore, ctx, 'isk');
+      case 'minutes': return (s.dur || 0) / 60;
+      default: return 0;
+    }
+  }
+  /** Столбцы графика: все интервалы периода, включая нулевые; сессия относится к интервалу своего начала. */
+  function buckets(list, range, metric, ctx) {
+    var starts = bucketStarts(range), vals = starts.map(function () { return 0; });
+    list.forEach(function (s) {
+      if (s.t0 < range.from || s.t0 >= range.to || !starts.length) return;
+      var lo = 0, hi = starts.length - 1;
+      while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (starts[mid] <= s.t0) lo = mid; else hi = mid - 1; }
+      vals[lo] += metricValue(s, metric, ctx);
+    });
+    return starts.map(function (t, i) {
+      return { start: t, end: i + 1 < starts.length ? starts[i + 1] : range.to, label: bucketLabel(t, range.unit), value: vals[i] };
+    });
+  }
+  function addMap(dst, src) { for (var k in (src || {})) dst[k] = (dst[k] || 0) + (src[k] || 0); return dst; }
+  function mergeActors(dst, src, extra) {
+    for (var k in (src || {})) {
+      var a = src[k], d = dst[k] || (dst[k] = { dmg: 0, hits: 0, miss: 0, refl: 0, max: 0, ship: '', weapons: {}, q: {}, sessions: 0 });
+      d.dmg += a.dmg || 0; d.hits += a.hits || 0; d.miss += a.miss || 0; d.refl += a.refl || 0;
+      d.max = Math.max(d.max, a.max || 0); d.sessions++;
+      if (a.ship) d.ship = a.ship;
+      addMap(d.weapons, a.weapons); addMap(d.q, a.q);
+      if (extra) extra(d, a);
+    }
+  }
+  /** Суммы по списку сессий (всё, что показывается в плитках и таблицах). */
+  function sumSessions(list) {
+    var T = {
+      n: list.length, out: 0, in: 0, refl: 0, miss_in: 0, miss_out: 0, hits_out: 0, hits_in: 0, bounty: 0, bounty_n: 0,
+      ore_total: 0, residue: 0, cycles: 0, dur: 0, unparsed: 0, peak_dps: 0, peak_dps_in: 0,
+      span_out: 0, span_in: 0, dur_combat: 0, dur_mining: 0, dur_bounty: 0,
+      ore: {}, ore_crit: {}, ore_residue: {}, ore_cycles: {}, weapons: {}, targets: {}, attackers: {}, in_weapons: {},
+      systems: {}, reps_in: {}, reps_out: {}, reps_in_from: {}, reps_out_to: {},
+      neut_in: { gj: 0, n: 0, from: {} }, nos_in: { gj: 0, n: 0, from: {} }, ewar: {}, who: {}, minT0: null, maxT1: null
+    };
+    var keys = ['out', 'in', 'refl', 'miss_in', 'miss_out', 'hits_out', 'hits_in', 'bounty', 'bounty_n', 'ore_total', 'residue', 'cycles', 'dur', 'unparsed'];
+    list.forEach(function (s) {
+      keys.forEach(function (k) { T[k] += s[k] || 0; });
+      T.peak_dps = Math.max(T.peak_dps, s.peak_dps || 0);
+      T.peak_dps_in = Math.max(T.peak_dps_in, s.peak_dps_in || 0);
+      if (s.avg_dps > 0) T.span_out += s.out / s.avg_dps;
+      if (s.avg_dps_in > 0) T.span_in += s.in / s.avg_dps_in;
+      if (s.out > 0) T.dur_combat += s.dur || 0;
+      if (s.ore_total > 0) T.dur_mining += s.dur || 0;
+      if (s.bounty > 0) T.dur_bounty += s.dur || 0;
+      T.who[s.who] = (T.who[s.who] || 0) + 1;
+      T.minT0 = T.minT0 === null ? s.t0 : Math.min(T.minT0, s.t0);
+      T.maxT1 = T.maxT1 === null ? s.t1 : Math.max(T.maxT1, s.t1);
+      addMap(T.ore, s.ore); addMap(T.ore_crit, s.ore_crit); addMap(T.ore_residue, s.ore_residue); addMap(T.ore_cycles, s.ore_cycles);
+      for (var w in (s.weapons || {})) {
+        var a = s.weapons[w], d = T.weapons[w] || (T.weapons[w] = { dmg: 0, hits: 0, miss: 0, max: 0, refl: 0, active: 0, peak: 0, q: {}, sessions: 0, targets: {} });
+        d.dmg += a.dmg || 0; d.hits += a.hits || 0; d.miss += a.miss || 0; d.refl += a.refl || 0;
+        d.max = Math.max(d.max, a.max || 0); d.peak = Math.max(d.peak, a.peak || 0);
+        if (a.dmg > 0) d.active += a.active || 0;
+        d.sessions++; addMap(d.q, a.q); addMap(d.targets, a.targets);
+      }
+      mergeActors(T.targets, s.targets);
+      mergeActors(T.attackers, s.attackers);
+      for (var iw in (s.in_weapons || {})) {
+        var b = s.in_weapons[iw], e = T.in_weapons[iw] || (T.in_weapons[iw] = { dmg: 0, hits: 0, miss: 0, max: 0 });
+        e.dmg += b.dmg || 0; e.hits += b.hits || 0; e.miss += b.miss || 0; e.max = Math.max(e.max, b.max || 0);
+      }
+      for (var sy in (s.systems || {})) {
+        var c = s.systems[sy], g = T.systems[sy] || (T.systems[sy] = { out: 0, in: 0, bounty: 0, ore: 0, n: 0, sessions: 0, time: 0 });
+        g.out += c.out || 0; g.in += c.in || 0; g.bounty += c.bounty || 0; g.ore += c.ore || 0; g.n += c.n || 0; g.sessions++;
+        g.time += Math.max(0, (c.t1 || 0) - (c.t0 || 0));
+      }
+      ['reps_in', 'reps_out'].forEach(function (rk) {
+        for (var layer in (s[rk] || {})) {
+          var r = s[rk][layer], q = T[rk][layer] || (T[rk][layer] = { hp: 0, n: 0 });
+          q.hp += r.hp || 0; q.n += r.n || 0;
+        }
+      });
+      addMap(T.reps_in_from, s.reps_in_from); addMap(T.reps_out_to, s.reps_out_to);
+      ['neut_in', 'nos_in'].forEach(function (nk) {
+        var src = s[nk]; if (!src) return;
+        T[nk].gj += src.gj || 0; T[nk].n += src.n || 0; addMap(T[nk].from, src.from);
+      });
+      for (var lb in (s.ewar || {})) {
+        var ew = T.ewar[lb] || (T.ewar[lb] = { n: 0, who: {} });
+        ew.n += s.ewar[lb].n || 0; addMap(ew.who, s.ewar[lb].who);
+      }
+    });
+    for (var wk in T.weapons) {
+      var x = T.weapons[wk], shots = x.hits + x.miss;
+      x.dps = x.active > 0 ? x.dmg / x.active : 0;
+      x.hit_rate = shots ? x.hits / shots : null;
+      x.avg_hit = x.hits ? x.dmg / x.hits : 0;
+    }
+    T.avg_dps = T.span_out > 0 ? T.out / T.span_out : 0;
+    T.avg_dps_in = T.span_in > 0 ? T.in / T.span_in : 0;
+    return T;
+  }
+  /** Красивый максимум оси и шаг делений. */
+  function niceScale(v) {
+    if (!(v > 0)) return { max: 1, step: 0.25 };
+    var e = Math.pow(10, Math.floor(Math.log10(v))), f = v / e;
+    var opts = [[1, 0.2], [1.5, 0.5], [2, 0.5], [2.5, 0.5], [3, 1], [4, 1], [5, 1], [6, 2], [8, 2], [10, 2]];
+    for (var i = 0; i < opts.length; i++) {
+      if (f <= opts[i][0] * (1 + 1e-9)) return { max: +(opts[i][0] * e).toPrecision(12), step: +(opts[i][1] * e).toPrecision(12) };
+    }
+    return { max: 10 * e, step: 2 * e };
+  }
+  /** Продажа объёма в стакан buy-ордеров (цены по убыванию). */
+  function sellToBook(book, units) {
+    var left = units, isk = 0;
+    (book || []).forEach(function (o) {
+      if (left <= 0) return;
+      var price = o[0], vol = o[1], minv = o[2] || 1;
+      if (left < minv) return;
+      var q = Math.min(left, vol);
+      isk += q * price; left -= q;
+    });
+    return { isk: isk, sold: units - left, left: left };
+  }
+  function denseSeries(sparse, n) {
+    var a = new Array(Math.max(0, n)).fill(0);
+    (sparse || []).forEach(function (p) { if (p[0] >= 0 && p[0] < n) a[p[0]] = p[1]; });
+    return a;
+  }
+  /** Текущий DPS идущей сессии: урон за последние window секунд по ряду с шагом series.step. */
+  function recentDps(rec, now, window) {
+    window = window || 30;
+    var s = rec && rec.series; if (!s) return 0;
+    var from = now - window, total = 0;
+    (s.out || []).forEach(function (p) { var t = s.t0 + p[0] * s.step; if (t + s.step > from && t <= now) total += p[1]; });
+    return total / window;
+  }
+  function secClass(sec) { if (bad(sec)) return ''; var r = secRound(sec); return r >= 0.5 ? 'hi' : r > 0 ? 'lo' : 'null'; }
+  function secRound(sec) { if (bad(sec)) return null; if (sec > 0 && sec < 0.05) return 0.1; return Math.round(sec * 10) / 10; }
+  function sortBy(rows, key, dir) {
+    return rows.slice().sort(function (a, b) {
+      var x = a[key], y = b[key];
+      if (x === y) return 0;
+      if (x === null || x === undefined) return 1;
+      if (y === null || y === undefined) return -1;
+      if (typeof x === 'string') return dir * x.localeCompare(y, 'ru');
+      return dir * (x < y ? -1 : 1);
+    });
+  }
+  function entries(map, key) {
+    return Object.keys(map || {}).map(function (k) { var v = map[k]; return typeof v === 'object' ? Object.assign({ name: k }, v) : { name: k, value: v }; })
+      .sort(function (a, b) { return (b[key || 'value'] || 0) - (a[key || 'value'] || 0); });
+  }
+  return {
+    fmtInt: fmtInt, fmtNum: fmtNum, fmtCompact: fmtCompact, fmtIsk: fmtIsk, fmtPct: fmtPct, fmtDur: fmtDur,
+    fmtTime: fmtTime, fmtTimeS: fmtTimeS, fmtDate: fmtDate, fmtDateFull: fmtDateFull, fmtDateTime: fmtDateTime,
+    dayStart: dayStart, addDays: addDays, parseDateInput: parseDateInput, toDateInput: toDateInput,
+    periodRange: periodRange, bucketStarts: bucketStarts, bucketLabel: bucketLabel, filterSessions: filterSessions,
+    metricValue: metricValue, oreSum: oreSum, buckets: buckets, sumSessions: sumSessions, niceScale: niceScale,
+    sellToBook: sellToBook, denseSeries: denseSeries, recentDps: recentDps, secClass: secClass, secRound: secRound,
+    sortBy: sortBy, entries: entries, addMap: addMap
+  };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = L;
+/* LOGIC-END */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  // Встраивание (например, в Alliance Auth): window.ELW_CFG = {base, mode, csrf, theme, title}
+  var CFG = window.ELW_CFG || {};
+  var BASE = CFG.base || '';
+  var AA_MODE = CFG.mode === 'aa';
+  if (CFG.theme === 'dark' || CFG.theme === 'light') document.documentElement.setAttribute('data-theme', CFG.theme);
+  (function () {                                         // кнопка темы; при встраивании с заданной темой её нет
+    var btn = $('themeBtn'), root = document.documentElement;
+    if (CFG.theme) { btn.classList.add('hidden'); return; }
+    function paint() { btn.textContent = root.getAttribute('data-theme') === 'light' ? 'Тёмная тема' : 'Светлая тема'; }
+    btn.addEventListener('click', function () {
+      var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('elw.theme', next); } catch (e) { }
+      paint();
+    });
+    paint();
+  })();
+  // от слабого к сильному (порядок проверен по реальным логам: средний урон растёт слева направо)
+  var QUALITY = ['Царапнул', 'Скользнул', 'Попал', 'Пробил', 'Раздробил', 'Сокрушил'];
+  var QINFO = {
+    'Царапнул': 'Самый слабый удар: около 50–62% обычного урона. Орудие едва достало цель.',
+    'Скользнул': 'Слабый удар: около 62–75% обычного урона.',
+    'Попал': 'Обычное попадание: около 75–100% урона.',
+    'Пробил': 'Хорошее попадание: около 100–125% урона.',
+    'Раздробил': 'Отличное попадание: около 125–149% урона, максимум для обычного удара.',
+    'Сокрушил': 'Критический удар: тройной урон (×3). Выпадает примерно в 1% выстрелов.'
+  };
+  var QNOTE = 'Сила удара турели или дрона выбирается случайно при каждом выстреле: от 50% до 149% обычного урона, а 1 выстрел из 100 наносит тройной урон. Промахи отнимают самые сильные удары: чем хуже шанс попасть (не хватает трекинга, цель вне оптимальной дальности), тем меньше «Раздробил» и «Пробил». Источник: EVE University, Turret mechanics.';
+  var QCOLORS = ['#8a94a3', '#b9a24a', '#2f8fbf', '#2f6fde', '#7a5bd6', '#d4483b'];
+  var METRIC_INFO = {
+    out: { name: 'Нанесённый урон', color: 'var(--c-out)', fmt: L.fmtCompact },
+    in: { name: 'Полученный урон', color: 'var(--c-in)', fmt: L.fmtCompact },
+    bounty: { name: 'Баунти', color: 'var(--c-bounty)', fmt: L.fmtIsk },
+    ore: { name: 'Руда, ед.', color: 'var(--c-ore)', fmt: L.fmtCompact },
+    ore_m3: { name: 'Руда, м³', color: 'var(--c-ore)', fmt: function (v) { return L.fmtCompact(v) + ' м³'; } },
+    ore_isk: { name: 'Стоимость руды', color: 'var(--c-ore)', fmt: L.fmtIsk },
+    minutes: { name: 'Минуты в игре', color: 'var(--c-min)', fmt: function (v) { return L.fmtDur(v * 60); } }
+  };
+
+  // ---------- состояние и настройки ----------
+  var S = {
+    history: [], live: null, meta: null, unparsed: null, histCount: -1,
+    period: 'd30', who: '', from: '', to: '', tab: 'overview', metric: 'out', priceMode: 'buy',
+    showShort: false, sort: {}, lastOk: 0, error: ''
+  };
+  var PREF_KEYS = ['period', 'who', 'from', 'to', 'tab', 'metric', 'priceMode', 'showShort'];
+  try {
+    var saved = JSON.parse(localStorage.getItem('elw.prefs') || '{}');
+    PREF_KEYS.forEach(function (k) { if (saved[k] !== undefined) S[k] = saved[k]; });
+  } catch (e) { /* хранилище недоступно — работаем без него */ }
+  function savePrefs() {
+    try { var o = {}; PREF_KEYS.forEach(function (k) { o[k] = S[k]; }); localStorage.setItem('elw.prefs', JSON.stringify(o)); } catch (e) { }
+  }
+
+  // ---------- утилиты ----------
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function cookie(name) {
+    var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  function api(path, opts) {
+    opts = Object.assign({ cache: 'no-store', credentials: 'same-origin' }, opts || {});
+    if (CFG.csrf && opts.method && opts.method !== 'GET') {
+      opts.headers = Object.assign({ 'X-CSRFToken': cookie(CFG.csrf) }, opts.headers || {});
+    }
+    return fetch(BASE + path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok && !j.message) j.message = 'HTTP ' + r.status; j._status = r.status; return j; });
+    });
+  }
+  function nowTs() { return Math.floor(Date.now() / 1000); }
+  function aliasOf(name) { var m = S.meta; return (m && m.aliases && m.aliases[name]) || name; }
+  function typeOf(name) { var m = S.meta; if (!m || !m.types) return null; return m.types[aliasOf(name)] || m.types[name] || null; }
+  function sysOf(name) { var m = S.meta; if (!m || !m.systems) return null; return m.systems[aliasOf(name)] || m.systems[name] || null; }
+  function volumeOf(name) { var t = typeOf(name); return t && typeof t.volume === 'number' ? t.volume : null; }
+  function priceInfo(name) {
+    var m = S.meta; if (!m) return null;
+    var ov = m.overrides || {};
+    if (typeof ov[name] === 'number') return { unit: ov[name], override: true };
+    if (typeof ov[aliasOf(name)] === 'number') return { unit: ov[aliasOf(name)], override: true };
+    var t = typeOf(name); if (!t || !m.prices || !m.prices.types) return null;
+    var p = m.prices.types[String(t.id)]; if (!p) return null;
+    var unit = S.priceMode === 'sell' ? p.sell : S.priceMode === 'avg' ? p.avg : p.buy;
+    return { unit: typeof unit === 'number' ? unit : null, book: p.buy_book, p: p };
+  }
+  function priceOf(name) { var p = priceInfo(name); return p && typeof p.unit === 'number' ? p.unit : null; }
+  var CTX = { volumeOf: volumeOf, priceOf: priceOf };
+  function icon(name) {
+    var t = typeOf(name);
+    return t && t.id ? '<img class="ico" src="' + BASE + '/icons/' + t.id + '.png" alt="" width="22" height="22" loading="lazy">' : '';
+  }
+  function catBadge(name) {
+    var t = typeOf(name); if (!t) return '';
+    var c = t.category_id === 8 ? 'боеприпас' : t.category_id === 18 ? 'дрон' : t.category_id === 87 ? 'истребитель' : t.category_id === 7 ? 'модуль' : '';
+    return c ? '<span class="cat" title="' + esc(t.group || '') + '">' + c + '</span>' : '';
+  }
+  function secHtml(name) {
+    var s = sysOf(name); if (!s || s.sec === undefined || s.sec === null) return '';
+    var r = L.secRound(s.sec);
+    return '<span class="sec ' + L.secClass(s.sec) + '" title="Статус безопасности ' + esc(L.fmtNum(s.sec, 3)) + '">' + esc(r.toFixed(1)) + '</span> ';
+  }
+  function tile(k, v, s, cls) {
+    return '<div class="tile ' + (cls || '') + '"><div class="k">' + esc(k) + '</div><div class="v" title="' + esc(v) + '">' + esc(v) + '</div>' + (s ? '<div class="s" title="' + esc(s) + '">' + esc(s) + '</div>' : '') + '</div>';
+  }
+  function empty(msg) { return '<div class="empty">' + esc(msg) + '</div>'; }
+  function qbar(q) {
+    var total = 0; QUALITY.forEach(function (k) { total += (q || {})[k] || 0; });
+    if (!total) return '<span class="muted">—</span>';
+    var parts = QUALITY.map(function (k, i) {
+      var v = (q || {})[k] || 0; return v ? '<span style="width:' + (v / total * 100).toFixed(2) + '%;background:' + QCOLORS[i] + '"></span>' : '';
+    }).join('');
+    var title = QUALITY.filter(function (k) { return (q || {})[k]; }).map(function (k) { return k + ': ' + q[k] + ' (' + L.fmtPct(q[k] / total) + ')'; }).join('\n');
+    return '<span class="qbar" role="img" aria-label="' + esc(title.replace(/\n/g, '; ')) + '" title="' + esc(title) + '">' + parts + '</span>';
+  }
+
+  /**
+   * Таблица с сортировкой. cols: [{k, t, l(eft), f(row)->html, sort(default dir)}]
+   */
+  function table(id, rows, cols, opts) {
+    opts = opts || {};
+    if (!rows.length) return empty(opts.empty || 'Нет данных за выбранный период');
+    var st = S.sort[id] || opts.sort || null;
+    if (st) rows = L.sortBy(rows, st.k, st.d);
+    var limit = opts.limit && rows.length > opts.limit ? opts.limit : 0;
+    var shown = limit ? rows.slice(0, limit) : rows;
+    var h = '<div class="tw"><table data-tid="' + esc(id) + '"><thead><tr>';
+    cols.forEach(function (c) {
+      var sorted = st && st.k === c.k;
+      h += '<th scope="col" class="' + (c.l ? 'l ' : '') + (c.k ? 'sort' : '') + '"' + (c.k ? ' tabindex="0" data-k="' + esc(c.k) + '"' : '') +
+        (sorted ? ' aria-sort="' + (st.d > 0 ? 'ascending' : 'descending') + '"' : '') + (c.title ? ' title="' + esc(c.title) + '"' : '') + '>' + esc(c.t) + '</th>';
+    });
+    h += '</tr></thead><tbody>';
+    shown.forEach(function (r) {
+      var attrs = opts.rowAttrs ? opts.rowAttrs(r) : '';
+      h += '<tr' + attrs + '>';
+      cols.forEach(function (c) { h += '<td class="' + (c.l ? 'l ' : '') + (c.cls || '') + '">' + (c.f ? c.f(r) : esc(r[c.k])) + '</td>'; });
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    if (limit) h += '<div class="small muted" style="margin-top:6px">Показаны первые ' + limit + ' из ' + rows.length + '</div>';
+    return h;
+  }
+  document.addEventListener('click', function (e) {
+    var th = e.target.closest && e.target.closest('th.sort');
+    if (th) return sortClick(th);
+  });
+  document.addEventListener('keydown', function (e) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('th.sort')) { e.preventDefault(); sortClick(e.target); }
+  });
+  function sortClick(th) {
+    var tid = th.closest('table').getAttribute('data-tid'), k = th.getAttribute('data-k');
+    var cur = S.sort[tid];
+    S.sort[tid] = { k: k, d: cur && cur.k === k ? -cur.d : (k === 'name' || k === 'who' ? 1 : -1) };
+    render();
+    var again = document.querySelector('table[data-tid="' + tid + '"] th[data-k="' + k + '"]');
+    if (again) again.focus();
+  }
+  // битые иконки просто убираем
+  document.addEventListener('error', function (e) { if (e.target && e.target.tagName === 'IMG') e.target.remove(); }, true);
+
+  // ---------- графики (SVG) ----------
+  var CHARTS = {};
+  function svgEl(w, h, inner, label) {
+    return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" role="img" aria-label="' + esc(label) + '">' + inner + '</svg>';
+  }
+  function barChart(el, data, info) {
+    var w = Math.max(280, el.clientWidth || 600), h = 230, padL = 54, padR = 8, padT = 10, padB = 26;
+    var max = 0; data.forEach(function (d) { max = Math.max(max, d.value); });
+    var sc = L.niceScale(max), pw = w - padL - padR, ph = h - padT - padB, n = data.length || 1;
+    var bw = pw / n, g = '';
+    for (var v = 0; v <= sc.max + sc.step / 2; v += sc.step) {
+      var y = padT + ph - v / sc.max * ph;
+      g += '<line class="grid" x1="' + padL + '" x2="' + (w - padR) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '"/>';
+      g += '<text x="' + (padL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end">' + esc(info.axis ? info.axis(v) : L.fmtCompact(v)) + '</text>';
+    }
+    var every = Math.max(1, Math.ceil(n * 44 / pw));
+    data.forEach(function (d, i) {
+      var bh = d.value / sc.max * ph, x = padL + i * bw + Math.max(1, bw * 0.12), bwi = Math.max(1, bw * 0.76);
+      g += '<rect x="' + x.toFixed(1) + '" y="' + (padT + ph - bh).toFixed(1) + '" width="' + bwi.toFixed(1) + '" height="' + Math.max(0, bh).toFixed(1) + '" rx="2" fill="' + info.color + '" data-i="' + i + '"></rect>';
+      if (i % every === 0) g += '<text x="' + (padL + i * bw + bw / 2).toFixed(1) + '" y="' + (h - 8) + '" text-anchor="middle">' + esc(d.label) + '</text>';
+    });
+    g += '<rect class="hover" x="' + padL + '" y="' + padT + '" width="' + pw + '" height="' + ph + '" fill="transparent"></rect>';
+    var total = data.reduce(function (a, d) { return a + d.value; }, 0);
+    el.innerHTML = svgEl(w, h, g, info.name + ': всего ' + info.fmt(total) + ' за ' + n + ' интервал(ов)');
+    CHARTS[el.id] = { type: 'bar', data: data, info: info, padL: padL, bw: bw, n: n };
+  }
+  function lineChart(el, series, opts) {
+    var w = Math.max(280, el.clientWidth || 600), h = opts.height || 220, padL = 54, padR = 10, padT = 10, padB = 26;
+    var xs = opts.xs, n = xs.length;
+    if (!n) { el.innerHTML = empty('Нет данных для графика'); return; }
+    var max = 0; series.forEach(function (s) { s.values.forEach(function (v) { max = Math.max(max, v); }); });
+    var sc = L.niceScale(max), pw = w - padL - padR, ph = h - padT - padB, g = '';
+    var xAt = function (i) { return padL + (n === 1 ? pw / 2 : i / (n - 1) * pw); };
+    for (var v = 0; v <= sc.max + sc.step / 2; v += sc.step) {
+      var y = padT + ph - v / sc.max * ph;
+      g += '<line class="grid" x1="' + padL + '" x2="' + (w - padR) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '"/>';
+      g += '<text x="' + (padL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end">' + esc(L.fmtCompact(v)) + '</text>';
+    }
+    var every = Math.max(1, Math.ceil(n * 58 / pw));
+    for (var i = 0; i < n; i += every) g += '<text x="' + xAt(i).toFixed(1) + '" y="' + (h - 8) + '" text-anchor="middle">' + esc(opts.xFmt(xs[i])) + '</text>';
+    series.forEach(function (s) {
+      var pts = s.values.map(function (v, i) { return xAt(i).toFixed(1) + ',' + (padT + ph - v / sc.max * ph).toFixed(1); }).join(' ');
+      g += '<polyline fill="none" stroke="' + s.color + '" stroke-width="' + (s.width || 1.8) + '" stroke-linejoin="round" points="' + pts + '"' + (s.dash ? ' stroke-dasharray="4 3"' : '') + '/>';
+    });
+    g += '<line class="cursor" x1="0" x2="0" y1="' + padT + '" y2="' + (padT + ph) + '" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/>';
+    g += '<rect class="hover" x="' + padL + '" y="' + padT + '" width="' + pw + '" height="' + ph + '" fill="transparent"></rect>';
+    el.innerHTML = svgEl(w, h, g, opts.label || 'График') +
+      '<div class="legend">' + series.map(function (s) { return '<span><i style="background:' + s.color + '"></i>' + esc(s.name) + '</span>'; }).join('') + '</div>';
+    CHARTS[el.id] = { type: 'line', series: series, xs: xs, opts: opts, padL: padL, pw: pw, n: n, xAt: xAt };
+  }
+  var tip = $('tip');
+  document.addEventListener('mousemove', function (e) {
+    var r = e.target.closest && e.target.closest('rect.hover');
+    if (!r) { tip.style.display = 'none'; hideCursors(); return; }
+    var el = r.closest('.chart'), c = CHARTS[el.id]; if (!c) return;
+    var box = el.getBoundingClientRect(), x = e.clientX - box.left, html = '';
+    if (c.type === 'bar') {
+      var i = Math.min(c.n - 1, Math.max(0, Math.floor((x - c.padL) / c.bw))), d = c.data[i];
+      if (!d) return;
+      html = '<b>' + esc(d.label) + '</b><br>' + esc(c.info.name) + ': ' + esc(c.info.fmt(d.value));
+    } else {
+      var j = Math.round((x - c.padL) / c.pw * (c.n - 1)); j = Math.min(c.n - 1, Math.max(0, j));
+      var xLong = c.opts.xFmtLong || c.opts.xFmt, yf = c.opts.yFmt || L.fmtInt;
+      html = '<b>' + esc(xLong(c.xs[j])) + '</b>';
+      c.series.forEach(function (s) {
+        if (s._pk === undefined) {                           // пик серии считаем один раз
+          s._pk = -1;
+          s.values.forEach(function (v, k) { if (v > 0 && (s._pk < 0 || v > s.values[s._pk])) s._pk = k; });
+        }
+        html += '<br><span style="color:' + s.color + '">■</span> ' + esc(s.name) + ': <b>' + esc(yf(s.values[j])) + '</b>';
+        if (s._pk >= 0) html += '<br><span class="muted">&nbsp;&nbsp;&nbsp;пик ' + esc(yf(s.values[s._pk])) + ' — ' + esc(xLong(c.xs[s._pk])) + (s._pk === j ? ' (здесь)' : '') + '</span>';
+      });
+      var cur = el.querySelector('line.cursor');
+      if (cur) { cur.setAttribute('x1', c.xAt(j)); cur.setAttribute('x2', c.xAt(j)); cur.setAttribute('visibility', 'visible'); }
+    }
+    // окно сессии — модальное (верхний слой): подсказка должна лежать внутри него, иначе её не видно
+    var host = r.closest('dialog') || document.body;
+    if (tip.parentNode !== host) host.appendChild(tip);
+    tip.style.position = 'fixed';
+    tip.innerHTML = html; tip.style.display = 'block';
+    var vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+    var tx = e.clientX + 14, ty = e.clientY + 14, tw = tip.offsetWidth, th = tip.offsetHeight;
+    if (tx + tw > vw - 8) tx = e.clientX - tw - 14;
+    if (ty + th > vh - 8) ty = e.clientY - th - 14;
+    tip.style.left = Math.max(4, tx) + 'px'; tip.style.top = Math.max(4, ty) + 'px';
+  });
+  function hideCursors() { document.querySelectorAll('line.cursor').forEach(function (l) { l.setAttribute('visibility', 'hidden'); }); }
+
+  // ---------- фильтр ----------
+  function allSessions() {
+    var live = (S.live && S.live.sessions) || [];
+    var ids = {}; S.history.forEach(function (s) { ids[s.id] = 1; });
+    return S.history.concat(live.filter(function (s) { return !ids[s.id]; }).map(function (s) { return Object.assign({ _live: true }, s); }));
+  }
+  function range() {
+    var all = S.history, minTs = null;
+    all.forEach(function (s) { if (minTs === null || s.t0 < minTs) minTs = s.t0; });
+    return L.periodRange(S.period, nowTs(), { from: S.from, to: S.to, minTs: minTs });
+  }
+  function selected() {
+    var r = range();
+    var list = L.filterSessions(allSessions(), { from: r.from, to: r.to, who: S.who });
+    return { range: r, list: list };
+  }
+
+  // ---------- отрисовка ----------
+  function render() {
+    renderControls();
+    var sel = selected(), T = L.sumSessions(sel.list);
+    var r = sel.range;
+    $('periodLabel').textContent = L.fmtDateFull(r.from) + ' — ' + L.fmtDateFull(r.to - 1) + (S.who ? ' · ' + S.who : '') + ' · сессий: ' + T.n;
+    if (S.tab === 'overview') renderOverview(sel, T);
+    if (S.tab === 'combat') renderCombat(T);
+    if (S.tab === 'mining') renderMining(sel, T);
+    if (S.tab === 'bounty') renderBounty(sel, T);
+    if (S.tab === 'sessions') renderSessions(sel);
+    if (S.tab === 'unparsed') renderUnparsed();
+    if (S.tab === 'modules') renderModules();
+    if (MODTABS[S.tab] && MODTABS[S.tab].render) {
+      try { MODTABS[S.tab].render(); } catch (e) { console.error('Модуль ' + S.tab + ':', e); }
+    }
+    renderLive();
+    renderFooter();
+  }
+  function renderControls() {
+    document.querySelectorAll('#periodSeg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-p') === S.period)); });
+    $('customDates').classList.toggle('hidden', S.period !== 'custom');
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      var on = b.getAttribute('data-tab') === S.tab;
+      b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1;
+      $('view-' + b.getAttribute('data-tab')).classList.toggle('hidden', !on);
+    });
+    var who = {}; allSessions().forEach(function (s) { who[s.who] = 1; });
+    ((S.live && S.live.characters) || []).forEach(function (c) { who[c] = 1; });
+    var names = Object.keys(who).sort();
+    $('whoWrap').classList.toggle('hidden', names.length < 2);
+    var sel = $('who'), want = [''].concat(names).join('\n');
+    if (sel.getAttribute('data-opts') !== want) {
+      sel.innerHTML = '<option value="">Все персонажи</option>' + names.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('');
+      sel.setAttribute('data-opts', want);
+    }
+    sel.value = names.indexOf(S.who) >= 0 ? S.who : '';
+    $('metric').value = S.metric; $('priceMode').value = S.priceMode; $('showShort').checked = !!S.showShort;
+    var unp = (S.live && S.live.unparsed_total) || 0;
+    $('unpBadge').textContent = L.fmtInt(unp); $('unpBadge').classList.toggle('warn', unp > 0);
+  }
+
+  function renderLive() {
+    var el = $('live'), lv = S.live;
+    if (!lv) { el.innerHTML = empty('Загрузка…'); return; }
+    var list = (lv.sessions || []).filter(function (s) { return !S.who || s.who === S.who; });
+    var h = '';
+    if (!AA_MODE && !lv.logs_dir_exists) {
+      h += '<div class="notice warn">Папка логов не найдена: <code>' + esc(lv.logs_dir) + '</code>. Укажите путь в <code>config.json</code> (параметр <code>logs_dir</code>) и перезапустите приложение.</div>';
+    }
+    if (!list.length) {
+      var cs = lv.cur_sys || {}, where = Object.keys(cs).filter(function (k) { return !S.who || k === S.who; }).map(function (k) { return k + ' — ' + cs[k]; }).join(', ');
+      h += '<div class="empty">Сейчас нет идущей сессии. Она начнётся с первого выстрела, добычи или баунти и завершится через ' +
+        esc(L.fmtDur(lv.gap)) + ' без таких событий.' + (where ? '<br><span class="small">Последнее известное местоположение: ' + esc(where) + '</span>' : '') + '</div>';
+      el.innerHTML = h; return;
+    }
+    var now = lv.now || nowTs();
+    list.forEach(function (s) {
+      var tgt = Object.keys(s.targets || {}).length, sysNames = Object.keys(s.systems || {});
+      var curSys = (lv.cur_sys || {})[s.who] || sysNames[sysNames.length - 1] || '';
+      var idle = Math.max(0, now - s.t1);
+      h += '<div class="live-card"><div class="live-head"><b>' + esc(s.who) + '</b>' +
+        '<span class="muted">' + secHtml(curSys) + esc(curSys) + '</span>' +
+        '<span class="muted">с ' + esc(L.fmtTime(s.t0)) + ', идёт ' + esc(L.fmtDur(s.t1 - s.t0)) + '</span>' +
+        '<span class="muted small">последнее событие ' + esc(L.fmtDur(idle)) + ' назад</span>' +
+        '<button type="button" class="btn small" data-open="' + esc(s.id) + '">Подробнее</button></div><div class="tiles">' +
+        tile('Нанесено', L.fmtInt(s.out), 'DPS сейчас ' + L.fmtNum(L.recentDps(s, now), 1) + ' · ср. ' + L.fmtNum(s.avg_dps, 1) + ' · пик ' + L.fmtNum(s.peak_dps, 1), 'out') +
+        tile('Получено', L.fmtInt(s.in), 'промахов по вам: ' + L.fmtInt(s.miss_in) + (s.refl ? ' · отражено ' + L.fmtInt(s.refl) : ''), 'in') +
+        tile('Баунти', L.fmtIsk(s.bounty), 'начислений: ' + L.fmtInt(s.bounty_n), 'bounty') +
+        tile('Руда', L.fmtInt(s.ore_total) + ' ед.', oreLine(s), 'ore') +
+        tile('Цели', L.fmtInt(tgt), topKey(s.targets, 'dmg')) +
+        '</div></div>';
+    });
+    el.innerHTML = h;
+  }
+  function oreLine(s) {
+    var m3 = L.oreSum(s.ore, CTX, 'm3'), isk = L.oreSum(s.ore, CTX, 'isk');
+    return (m3 ? L.fmtCompact(m3) + ' м³' : 'циклов: ' + L.fmtInt(s.cycles)) + (isk ? ' · ' + L.fmtIsk(isk) : '');
+  }
+  function topKey(map, key) {
+    var e = L.entries(map, key); return e.length ? 'больше всего: ' + e[0].name : '';
+  }
+
+  function renderOverview(sel, T) {
+    var oreM3 = L.oreSum(T.ore, CTX, 'm3'), oreIsk = L.oreSum(T.ore, CTX, 'isk');
+    $('totals').innerHTML =
+      tile('Сессий', L.fmtInt(T.n), Object.keys(T.who).length > 1 ? 'персонажей: ' + Object.keys(T.who).length : '') +
+      tile('В игре (по сессиям)', L.fmtDur(T.dur), T.n ? 'в среднем ' + L.fmtDur(T.dur / T.n) : '') +
+      tile('Нанесено урона', L.fmtCompact(T.out), 'ср. DPS ' + L.fmtNum(T.avg_dps, 1) + ' · пик ' + L.fmtNum(T.peak_dps, 1), 'out') +
+      tile('Получено урона', L.fmtCompact(T.in), 'промахов по вам ' + L.fmtInt(T.miss_in), 'in') +
+      tile('Баунти', L.fmtIsk(T.bounty), T.dur_bounty ? L.fmtIsk(T.bounty / T.dur_bounty * 3600) + '/ч' : '', 'bounty') +
+      tile('Руда', L.fmtCompact(T.ore_total) + ' ед.', oreM3 ? L.fmtCompact(oreM3) + ' м³' : '', 'ore') +
+      tile('Стоимость руды', oreIsk ? L.fmtIsk(oreIsk) : '—', priceModeName(), 'ore') +
+      (T.refl ? tile('Отражено', L.fmtCompact(T.refl), 'урон по неуязвимым целям') : '') +
+      (T.unparsed ? tile('Нераспознано строк', L.fmtInt(T.unparsed), 'см. вкладку «Нераспознанное»') : '');
+    var info = METRIC_INFO[S.metric] || METRIC_INFO.out;
+    barChart($('mainChart'), L.buckets(sel.list, sel.range, S.metric, CTX), info);
+    var wr = L.entries(T.weapons, 'dmg').slice(0, 8);
+    $('ovWeapons').innerHTML = wr.length ? table('ovw', wr, [
+      { t: 'Оружие', l: 1, f: function (r) { return icon(r.name) + esc(r.name); }, cls: 'name' },
+      { t: 'Урон', f: function (r) { return L.fmtInt(r.dmg); } },
+      { t: 'DPS', f: function (r) { return L.fmtNum(r.dps, 1); } },
+      { t: 'Пик', f: function (r) { return L.fmtNum(r.peak, 1); } }
+    ]) : empty('Стрельбы за период не было');
+    var orr = L.entries(T.ore).slice(0, 8);
+    $('ovOre').innerHTML = orr.length ? table('ovo', orr, [
+      { t: 'Руда', l: 1, f: function (r) { return icon(r.name) + esc(r.name); }, cls: 'name' },
+      { t: 'Ед.', f: function (r) { return L.fmtInt(r.value); } },
+      { t: 'м³', f: function (r) { var v = volumeOf(r.name); return v === null ? '—' : L.fmtCompact(r.value * v); } },
+      { t: 'ISK', f: function (r) { var p = priceOf(r.name); return p === null ? '—' : L.fmtIsk(r.value * p); } }
+    ]) : empty('Добычи за период не было');
+    $('ovSystems').innerHTML = systemsTable('ovs', T, ['time', 'out', 'in', 'bounty', 'ore']);
+  }
+  function priceModeName() { return { buy: 'по Jita buy', sell: 'по Jita sell', avg: 'по средней цене' }[S.priceMode] || ''; }
+  function systemsTable(id, T, fields) {
+    var rows = Object.keys(T.systems).map(function (k) { var s = T.systems[k], info = sysOf(k); return Object.assign({ name: k, sec: info ? info.sec : null, region: info ? info.region : '' }, s); });
+    var cols = [{ k: 'name', t: 'Система', l: 1, f: function (r) { return secHtml(r.name) + esc(r.name); } },
+      { k: 'region', t: 'Регион', l: 1, f: function (r) { return esc(r.region || ''); } }];
+    var F = {
+      time: { k: 'time', t: 'Время', title: 'Сумма времени от первого до последнего события в системе', f: function (r) { return L.fmtDur(r.time); } },
+      out: { k: 'out', t: 'Нанесено', f: function (r) { return L.fmtInt(r.out); } },
+      in: { k: 'in', t: 'Получено', f: function (r) { return L.fmtInt(r.in); } },
+      bounty: { k: 'bounty', t: 'Баунти', f: function (r) { return L.fmtIsk(r.bounty); } },
+      ore: { k: 'ore', t: 'Руда, ед.', f: function (r) { return L.fmtInt(r.ore); } },
+      sessions: { k: 'sessions', t: 'Сессий', f: function (r) { return L.fmtInt(r.sessions); } }
+    };
+    fields.forEach(function (f) { cols.push(F[f]); });
+    return table(id, rows, cols, { sort: { k: fields[0], d: -1 }, empty: 'Нет данных о системах' });
+  }
+
+  function renderCombat(T) {
+    var shots = T.hits_out + T.miss_out;
+    $('cTiles').innerHTML =
+      tile('Нанесено', L.fmtInt(T.out), 'за ' + L.fmtInt(T.hits_out) + ' попаданий', 'out') +
+      tile('Средний DPS', L.fmtNum(T.avg_dps, 1), 'по времени стрельбы') +
+      tile('Пиковый DPS', L.fmtNum(T.peak_dps, 1), 'лучшие 30 с') +
+      tile('Попадания', shots ? L.fmtPct(T.hits_out / shots) : '—', 'промахов: ' + L.fmtInt(T.miss_out)) +
+      tile('Отражено', L.fmtInt(T.refl), 'не засчитано в урон') +
+      tile('Получено', L.fmtInt(T.in), 'DPS по вам ср. ' + L.fmtNum(T.avg_dps_in, 1) + ' · пик ' + L.fmtNum(T.peak_dps_in, 1), 'in') +
+      tile('Промахи по вам', L.fmtInt(T.miss_in), (T.hits_in + T.miss_in) ? 'уклонение ' + L.fmtPct(T.miss_in / (T.hits_in + T.miss_in)) : '');
+    var wr = L.entries(T.weapons, 'dmg').map(function (r) { r.share = T.out ? r.dmg / T.out : 0; r.shots = r.hits + r.miss; return r; });
+    $('cWeapons').innerHTML = table('cw', wr, [
+      { k: 'name', t: 'Оружие / заряд / дрон', l: 1, f: function (r) { return icon(r.name) + esc(r.name) + catBadge(r.name); }, cls: 'name' },
+      { k: 'dmg', t: 'Урон', f: function (r) { return L.fmtInt(r.dmg); } },
+      { k: 'share', t: 'Доля', f: function (r) { return L.fmtPct(r.share); } },
+      { k: 'dps', t: 'DPS', title: 'Урон / время работы оружия', f: function (r) { return L.fmtNum(r.dps, 1); } },
+      { k: 'peak', t: 'Пик 30 с', f: function (r) { return L.fmtNum(r.peak, 1); } },
+      { k: 'shots', t: 'Выстрелов', f: function (r) { return L.fmtInt(r.shots); } },
+      { k: 'hit_rate', t: 'Попадания', f: function (r) { return r.hit_rate === null ? '—' : L.fmtPct(r.hit_rate); } },
+      { k: 'avg_hit', t: 'Ср. удар', f: function (r) { return L.fmtNum(r.avg_hit, 1); } },
+      { k: 'max', t: 'Макс.', f: function (r) { return L.fmtInt(r.max); } },
+      { k: 'active', t: 'Время работы', f: function (r) { return L.fmtDur(r.active); } },
+      { t: 'Качество попаданий', f: function (r) { return qbar(r.q); } }
+    ], { sort: { k: 'dmg', d: -1 }, empty: 'Стрельбы за период не было' }) + qLegend();
+    var tr = L.entries(T.targets, 'dmg');
+    $('cTargets').innerHTML = table('ct', tr, [
+      { k: 'name', t: 'Цель', l: 1, cls: 'name', f: function (r) { return esc(r.name) + (r.count ? ' <span class="muted">(' + r.count + ')</span>' : ''); } },
+      { k: 'ship', t: 'Корабль', l: 1, f: function (r) { return esc(r.ship || ''); } },
+      { k: 'dmg', t: 'Урон', f: function (r) { return L.fmtInt(r.dmg); } },
+      { k: 'hits', t: 'Попаданий', f: function (r) { return L.fmtInt(r.hits); } },
+      { k: 'miss', t: 'Промахов', f: function (r) { return L.fmtInt(r.miss); } },
+      { k: 'max', t: 'Макс.', f: function (r) { return L.fmtInt(r.max); } },
+      { k: 'refl', t: 'Отражено', f: function (r) { return r.refl ? L.fmtInt(r.refl) : ''; } },
+      { k: 'sessions', t: 'Сессий', f: function (r) { return L.fmtInt(r.sessions); } }
+    ], { sort: { k: 'dmg', d: -1 }, limit: 100, empty: 'Целей за период не было' });
+    var ar = L.entries(T.attackers, 'dmg');
+    $('cAttackers').innerHTML = table('ca', ar, [
+      { k: 'name', t: 'Кто', l: 1, cls: 'name', f: function (r) { return esc(r.name); } },
+      { k: 'ship', t: 'Корабль', l: 1, f: function (r) { return esc(r.ship || ''); } },
+      { k: 'dmg', t: 'Урон', f: function (r) { return L.fmtInt(r.dmg); } },
+      { k: 'hits', t: 'Попал', f: function (r) { return L.fmtInt(r.hits); } },
+      { k: 'miss', t: 'Промах', f: function (r) { return L.fmtInt(r.miss); } },
+      { k: 'max', t: 'Макс.', f: function (r) { return L.fmtInt(r.max); } }
+    ], { sort: { k: 'dmg', d: -1 }, limit: 60, empty: 'По вам не стреляли' });
+    var iw = L.entries(T.in_weapons, 'dmg');
+    $('cInWeapons').innerHTML = table('ciw', iw, [
+      { k: 'name', t: 'Оружие', l: 1, cls: 'name', f: function (r) { return icon(r.name) + esc(r.name); } },
+      { k: 'dmg', t: 'Урон', f: function (r) { return L.fmtInt(r.dmg); } },
+      { k: 'hits', t: 'Попал', f: function (r) { return L.fmtInt(r.hits); } },
+      { k: 'miss', t: 'Промах', f: function (r) { return L.fmtInt(r.miss); } },
+      { k: 'max', t: 'Макс.', f: function (r) { return L.fmtInt(r.max); } }
+    ], { sort: { k: 'dmg', d: -1 }, limit: 60, empty: 'По вам не стреляли' });
+    $('cReps').innerHTML = repsHtml(T);
+    $('cEwar').innerHTML = ewarHtml(T);
+  }
+  function qLegend() {
+    return '<div class="legend">' + QUALITY.map(function (q, i) {
+      return '<span class="qhelp" tabindex="0" data-tip="' + esc(QINFO[q]) + '"><i style="background:' + QCOLORS[i] + '"></i>' + q + '</span>';
+    }).join('') + '<span class="qhelp qnote" tabindex="0" data-tip="' + esc(QNOTE) + '" aria-label="Что такое качество попадания">?</span></div>';
+  }
+  function repsHtml(T) {
+    var h = '', layers = ['щиты', 'броня', 'корпус'];
+    var rowsIn = layers.filter(function (l) { return T.reps_in[l]; }), rowsOut = layers.filter(function (l) { return T.reps_out[l]; });
+    if (!rowsIn.length && !rowsOut.length) return empty('Ремонта за период не было');
+    h += '<div class="tiles">';
+    rowsIn.forEach(function (l) { h += tile('Получено: ' + l, L.fmtInt(T.reps_in[l].hp) + ' HP', 'циклов: ' + L.fmtInt(T.reps_in[l].n), 'bounty'); });
+    rowsOut.forEach(function (l) { h += tile('Отремонтировано вами: ' + l, L.fmtInt(T.reps_out[l].hp) + ' HP', 'циклов: ' + L.fmtInt(T.reps_out[l].n), 'out'); });
+    h += '</div>';
+    var from = L.entries(T.reps_in_from), to = L.entries(T.reps_out_to);
+    if (from.length) h += '<h3>Кто вас чинил</h3>' + table('rif', from, [{ k: 'name', t: 'Логист', l: 1, f: function (r) { return esc(r.name); } }, { k: 'value', t: 'HP', f: function (r) { return L.fmtInt(r.value); } }], { limit: 20 });
+    if (to.length) h += '<h3>Кого чинили вы</h3>' + table('rot', to, [{ k: 'name', t: 'Цель', l: 1, f: function (r) { return esc(r.name); } }, { k: 'value', t: 'HP', f: function (r) { return L.fmtInt(r.value); } }], { limit: 20 });
+    h += '<p class="small muted">Исходящий ремонт брони и корпуса пока не распознаётся: его формат в русском клиенте ещё не встречался в логах (такие строки попадут в «Нераспознанное»).</p>';
+    return h;
+  }
+  function ewarHtml(T) {
+    var h = '', any = false;
+    if (T.neut_in.n || T.nos_in.n) {
+      any = true;
+      h += '<div class="tiles">' +
+        (T.neut_in.n ? tile('Нейтрализовано у вас', L.fmtInt(T.neut_in.gj) + ' ГДж', 'циклов: ' + L.fmtInt(T.neut_in.n), 'in') : '') +
+        (T.nos_in.n ? tile('Выпито носферату', L.fmtInt(T.nos_in.gj) + ' ГДж', 'циклов: ' + L.fmtInt(T.nos_in.n), 'in') : '') + '</div>';
+      var src = L.entries(L.addMap(L.addMap({}, T.neut_in.from), T.nos_in.from));
+      h += '<h3>Источники</h3>' + table('nsrc', src, [{ k: 'name', t: 'Кто', l: 1, f: function (r) { return esc(r.name); } }, { k: 'value', t: 'ГДж', f: function (r) { return L.fmtInt(r.value); } }], { limit: 20 });
+    }
+    var ew = L.entries(T.ewar, 'n');
+    if (ew.length) {
+      any = true;
+      h += '<h3>Варп-глушение, варп-подавление, помехи</h3>' + table('ew', ew, [
+        { k: 'name', t: 'Событие', l: 1, f: function (r) { return esc(r.name); } },
+        { k: 'n', t: 'Раз', f: function (r) { return L.fmtInt(r.n); } },
+        { t: 'Кто / кого (чаще всего)', l: 1, f: function (r) { return esc(L.entries(r.who).slice(0, 3).map(function (e) { return e.name + ' ×' + e.value; }).join('; ')); } }
+      ]);
+    }
+    if (!any) return empty('Нейтрализации и РЭБ за период не было');
+    return h + '<p class="small muted">Исходящие нейты пока не распознаются (неизвестен формат строки) — попадут в «Нераспознанное».</p>';
+  }
+
+  function renderMining(sel, T) {
+    var m = S.meta || {}, ps = m.price_status || {}, prices = m.prices || {};
+    var btn = $('priceBtn');
+    btn.disabled = !m.online_enabled || ps.state === 'running' || m.price_wait > 0;
+    var st = '';
+    if (!m.online_enabled) st = 'Онлайн-функции выключены (online_enabled в config.json). Можно задать цены вручную: ore_prices_override.';
+    else if (ps.state === 'running') st = 'Обновляю цены… ' + (ps.done || 0) + '/' + (ps.total || 0);
+    else if (ps.state === 'error') st = ps.message;
+    else if (prices.updated_at) st = 'Цены от ' + L.fmtDateTime(prices.updated_at) + (m.price_wait > 0 ? ' · следующее обновление через ' + L.fmtDur(m.price_wait) : '') + (m.auto_refresh_minutes ? ' · авто раз в ' + L.fmtDur(m.auto_refresh_minutes * 60) : '');
+    else st = 'Цены ещё не загружались';
+    if (ps.state === 'ok' && ps.message && prices.updated_at && nowTs() - prices.updated_at < 10) st = ps.message;
+    if (S.priceMsg) st = S.priceMsg + ' ' + st;
+    $('priceStatus').textContent = st;
+
+    var rows = Object.keys(T.ore).map(function (k) {
+      var units = T.ore[k], vol = volumeOf(k), pi = priceInfo(k), t = typeOf(k);
+      var unit = pi && typeof pi.unit === 'number' ? pi.unit : null;
+      var book = pi && pi.book ? L.sellToBook(pi.book, units) : null;
+      var cycles = T.ore_cycles[k] || 0, res = T.ore_residue[k] || 0;
+      return {
+        name: k, ru: t && t.name_ru && t.name_ru !== k ? t.name_ru : '', units: units, m3: vol === null ? null : units * vol,
+        crit: T.ore_crit[k] || 0, residue: res, residue_rate: (units + res) ? res / (units + res) : 0, cycles: cycles,
+        per_cycle: cycles ? (units - (T.ore_crit[k] || 0)) / cycles : null, price: unit, isk: unit === null ? null : units * unit,
+        book_isk: book ? book.isk : null, book_left: book ? book.left : 0, override: pi && pi.override, group: t ? t.group : ''
+      };
+    });
+    var totM3 = 0, totIsk = 0, totBook = 0, noVol = 0, noPrice = 0;
+    rows.forEach(function (r) { if (r.m3 === null) noVol++; else totM3 += r.m3; if (r.isk === null) noPrice++; else totIsk += r.isk; if (r.book_isk !== null) totBook += r.book_isk; });
+    var hours = T.dur_mining / 3600;
+    var crit = 0; for (var k in T.ore_crit) crit += T.ore_crit[k];
+    $('mTiles').innerHTML =
+      tile('Добыто', L.fmtInt(T.ore_total) + ' ед.', 'типов руды: ' + rows.length, 'ore') +
+      tile('Объём', totM3 ? L.fmtNum(totM3, 1) + ' м³' : '—', noVol ? 'нет объёма для ' + noVol + ' тип(ов)' : '', 'ore') +
+      tile('Стоимость', totIsk ? L.fmtIsk(totIsk) : '—', priceModeName() + (noPrice ? ' · без цены: ' + noPrice : ''), 'bounty') +
+      tile('Если продать сейчас', totBook ? L.fmtIsk(totBook) : '—', 'в buy-ордера Jita по стакану', 'bounty') +
+      tile('Время добычи', L.fmtDur(T.dur_mining), 'по сессиям с добычей') +
+      tile('Скорость', hours > 0 && totM3 ? L.fmtNum(totM3 / hours, 0) + ' м³/ч' : '—', hours > 0 && totIsk ? L.fmtIsk(totIsk / hours) + '/ч' : '') +
+      tile('Циклов', L.fmtInt(T.cycles), T.cycles ? 'в среднем ' + L.fmtNum((T.ore_total - crit) / T.cycles, 1) + ' ед.' : '') +
+      tile('Крит. добыча', L.fmtInt(crit) + ' ед.', T.ore_total ? L.fmtPct(crit / T.ore_total) + ' от добытого' : '') +
+      tile('Отходы', L.fmtInt(T.residue) + ' ед.', (T.ore_total + T.residue) ? L.fmtPct(T.residue / (T.ore_total + T.residue)) + ' потерь' : '', 'in');
+    $('mOre').innerHTML = table('mo', rows, [
+      { k: 'name', t: 'Руда', l: 1, cls: 'name', f: function (r) { return icon(r.name) + esc(r.name) + (r.ru ? ' <span class="muted small">' + esc(r.ru) + '</span>' : '') + (r.group ? '<span class="cat">' + esc(r.group) + '</span>' : ''); } },
+      { k: 'units', t: 'Ед.', f: function (r) { return L.fmtInt(r.units); } },
+      { k: 'm3', t: 'м³', f: function (r) { return r.m3 === null ? '—' : L.fmtNum(r.m3, 1); } },
+      { k: 'cycles', t: 'Циклов', f: function (r) { return L.fmtInt(r.cycles); } },
+      { k: 'per_cycle', t: 'Ед./цикл', f: function (r) { return r.per_cycle === null ? '—' : L.fmtNum(r.per_cycle, 1); } },
+      { k: 'crit', t: 'Крит.', f: function (r) { return r.crit ? L.fmtInt(r.crit) : ''; } },
+      { k: 'residue', t: 'Отходы', f: function (r) { return r.residue ? L.fmtInt(r.residue) + ' (' + L.fmtPct(r.residue_rate) + ')' : ''; } },
+      { k: 'price', t: 'Цена/ед.', f: function (r) { return r.price === null ? '—' : L.fmtNum(r.price, 2) + (r.override ? ' ✎' : ''); }, title: '✎ — ручная цена из config.json' },
+      { k: 'isk', t: 'Стоимость', f: function (r) { return r.isk === null ? '—' : L.fmtIsk(r.isk); } },
+      { k: 'book_isk', t: 'Если продать сейчас', f: function (r) { if (r.book_isk === null) return '—'; if (r.book_isk === 0 && r.book_left > 0) return '<span class="muted">нет buy-ордеров в Jita</span>'; return L.fmtIsk(r.book_isk) + (r.book_left > 0 ? ' <span class="muted small" title="Столько единиц не поместится в buy-ордера">(+' + L.fmtInt(r.book_left) + ' ед. не продать)</span>' : ''); } }
+    ], { sort: { k: 'units', d: -1 }, empty: 'Добычи за период не было' });
+    var info = METRIC_INFO.ore_m3;
+    var hasVol = rows.some(function (r) { return r.m3 !== null; });
+    barChart($('mChart'), L.buckets(sel.list, sel.range, hasVol ? 'ore_m3' : 'ore', CTX), hasVol ? info : METRIC_INFO.ore);
+    $('mSystems').innerHTML = systemsTable('ms', { systems: filterSys(T.systems, 'ore') }, ['ore', 'time', 'sessions']);
+  }
+  function filterSys(map, key) { var o = {}; for (var k in map) if (map[k][key] > 0) o[k] = map[k]; return o; }
+
+  function renderBounty(sel, T) {
+    var hours = T.dur_bounty / 3600;
+    var withB = sel.list.filter(function (s) { return s.bounty > 0; });
+    $('bTiles').innerHTML =
+      tile('Баунти', L.fmtIsk(T.bounty), 'начислений: ' + L.fmtInt(T.bounty_n), 'bounty') +
+      tile('В час', hours > 0 ? L.fmtIsk(T.bounty / hours) : '—', 'по сессиям с баунти') +
+      tile('Сессий с баунти', L.fmtInt(withB.length), withB.length ? 'в среднем ' + L.fmtIsk(T.bounty / withB.length) : '') +
+      tile('Среднее начисление', T.bounty_n ? L.fmtIsk(T.bounty / T.bounty_n) : '—', '');
+    barChart($('bChart'), L.buckets(sel.list, sel.range, 'bounty', CTX), METRIC_INFO.bounty);
+    $('bSystems').innerHTML = systemsTable('bs', { systems: filterSys(T.systems, 'bounty') }, ['bounty', 'time', 'sessions']);
+    var top = L.sortBy(withB, 'bounty', -1).slice(0, 15);
+    $('bTop').innerHTML = table('bt', top, [
+      { k: 't0', t: 'Начало', l: 1, f: function (r) { return esc(L.fmtDateTime(r.t0)); } },
+      { k: 'who', t: 'Персонаж', l: 1, f: function (r) { return esc(r.who); } },
+      { k: 'dur', t: 'Длит.', f: function (r) { return L.fmtDur(r.dur); } },
+      { k: 'bounty', t: 'Баунти', f: function (r) { return L.fmtIsk(r.bounty); } }
+    ], { rowAttrs: rowOpen, empty: 'Баунти за период не было' });
+  }
+  function rowOpen(r) { return ' class="click" tabindex="0" role="button" data-open="' + esc(r.id) + '" aria-label="Открыть сессию ' + esc(r.who + ' ' + L.fmtDateTime(r.t0)) + '"'; }
+
+  function renderSessions(sel) {
+    var list = sel.list.filter(function (s) { return S.showShort || s.significant !== false || s._live; });
+    $('sessCount').textContent = '(' + list.length + (list.length !== sel.list.length ? ' из ' + sel.list.length : '') + ')';
+    $('sessTable').innerHTML = table('ss', list, [
+      { k: 't0', t: 'Начало', l: 1, f: function (r) { return esc(L.fmtDateTime(r.t0)) + (r._live ? ' <span class="cat">идёт</span>' : ''); } },
+      { k: 'who', t: 'Персонаж', l: 1, f: function (r) { return esc(r.who); } },
+      { k: 'dur', t: 'Длит.', f: function (r) { return L.fmtDur(r.dur); } },
+      { k: 'out', t: 'Нанесено', f: function (r) { return L.fmtInt(r.out); } },
+      { k: 'avg_dps', t: 'DPS ср.', f: function (r) { return L.fmtNum(r.avg_dps, 1); } },
+      { k: 'peak_dps', t: 'DPS пик', f: function (r) { return L.fmtNum(r.peak_dps, 1); } },
+      { k: 'in', t: 'Получено', f: function (r) { return L.fmtInt(r.in); } },
+      { k: 'bounty', t: 'Баунти', f: function (r) { return r.bounty ? L.fmtIsk(r.bounty) : ''; } },
+      { k: 'ore_total', t: 'Руда, ед.', f: function (r) { return r.ore_total ? L.fmtInt(r.ore_total) : ''; } },
+      { t: 'Системы', l: 1, f: function (r) { return esc(Object.keys(r.systems || {}).filter(function (k) { return k !== '(неизвестно)'; }).join(', ')); } }
+    ], { sort: { k: 't0', d: -1 }, rowAttrs: function (r) { return rowOpen(r).replace('class="click"', 'class="click' + (r.significant === false ? ' short' : '') + '"'); }, empty: 'Сессий за период нет' });
+  }
+
+  function renderUnparsed() {
+    var u = S.unparsed;
+    if (!u) { $('unpTable').innerHTML = empty('Загрузка…'); loadUnparsed(); return; }
+    if (!u.items.length) { $('unpTable').innerHTML = empty('Нераспознанных строк нет — все строки боя, добычи и баунти разобраны.'); return; }
+    $('unpTable').innerHTML = '<div class="unp">' + table('unp', u.items.map(function (i) { return { name: i.text, count: i.count, type: i.type, last: i.last }; }), [
+      { k: 'count', t: 'Раз' , f: function (r) { return L.fmtInt(r.count); } },
+      { k: 'type', t: 'Тип', l: 1, f: function (r) { return esc(r.type); } },
+      { k: 'name', t: 'Пример строки', l: 1, f: function (r) { return '<span class="mono">' + esc(r.name) + '</span>'; } },
+      { k: 'last', t: 'Последний раз', f: function (r) { return esc(L.fmtDateTime(r.last)); } }
+    ], { sort: { k: 'count', d: -1 } }) + '</div>';
+  }
+  function loadUnparsed() { api('/api/unparsed').then(function (j) { if (j.items) { S.unparsed = j; if (S.tab === 'unparsed') renderUnparsed(); } }); }
+
+  function renderFooter() {
+    var lv = S.live;
+    var aa = lv && lv.aa, aaText = ' · данные только на этом компьютере';
+    if (aa && aa.configured) {
+      aaText = ' · итоги отправляются в AA <b>' + esc(aa.host) + '</b>' +
+        (aa.last_ok ? ' (последняя отправка ' + esc(L.fmtTime(aa.last_ok)) + ')' : '') +
+        (aa.queue ? ' · в очереди: ' + esc(aa.queue) : '') +
+        (aa.last_error ? ' · <span style="color:var(--warn)">ошибка: ' + esc(aa.last_error) + '</span>' : '') +
+        (aa.rejected ? ' · отклонено: ' + esc(aa.rejected) : '');
+    }
+    if (AA_MODE) {
+      $('footer').innerHTML = lv ? 'Данные из EVE Log Watcher пилотов, загруженные в Alliance Auth · время показано в часовом поясе браузера' +
+        (S.meta && S.meta.status && S.meta.status.ok === false ? ' · <span style="color:var(--warn)">ESI недоступен: ' + esc(S.meta.status.message) + '</span>' : '') : '';
+      return;
+    }
+    $('footer').innerHTML = lv ? 'Версия ' + esc(lv.version) + ' · логи: <code>' + esc(lv.logs_dir) + '</code> · время показано в часовом поясе браузера' + aaText +
+      (S.meta && S.meta.status && S.meta.status.ok === false ? ' · <span style="color:var(--warn)">ESI недоступен: ' + esc(S.meta.status.message) + '</span>' : '') : '';
+  }
+
+  // ---------- детали сессии ----------
+  var dlg = $('dlg'), lastFocus = null;
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest && e.target.closest('[data-open]');
+    if (t) openSession(t.getAttribute('data-open'));
+  });
+  document.addEventListener('keydown', function (e) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('tr[data-open]')) { e.preventDefault(); openSession(e.target.getAttribute('data-open')); }
+  });
+  $('dlgClose').addEventListener('click', function () { dlg.close(); });
+  dlg.addEventListener('close', function () { S.detail = null; if (lastFocus && document.contains(lastFocus)) lastFocus.focus(); });
+  dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+  function openSession(id) {
+    lastFocus = document.activeElement;
+    $('dlgTitle').textContent = 'Сессия';
+    $('dlgBody').innerHTML = empty('Загрузка…');
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    $('dlgClose').focus();
+    api('/api/session?id=' + encodeURIComponent(id)).then(function (rec) {
+      if (!rec || !rec.id) { $('dlgBody').innerHTML = empty(rec.error || 'Сессия не найдена'); return; }
+      renderDetail(rec);
+    });
+  }
+  function renderDetail(r) {
+    S.detail = r;
+    $('dlgTitle').textContent = r.who + ' · ' + L.fmtDateTime(r.t0) + '–' + L.fmtTime(r.t1) + ' · ' + L.fmtDur(r.dur);
+    var T = L.sumSessions([r]);
+    var b = $('dlgBody'), h = '';
+    var shots = r.hits_out + r.miss_out;
+    h += '<section class="panel"><div class="tiles">' +
+      tile('Нанесено', L.fmtInt(r.out), 'ср. DPS ' + L.fmtNum(r.avg_dps, 1) + ' · пик ' + L.fmtNum(r.peak_dps, 1), 'out') +
+      tile('Попадания', shots ? L.fmtPct(r.hits_out / shots) : '—', 'выстрелов ' + L.fmtInt(shots)) +
+      tile('Получено', L.fmtInt(r.in), 'ср. ' + L.fmtNum(r.avg_dps_in, 1) + ' · пик ' + L.fmtNum(r.peak_dps_in, 1) + ' DPS', 'in') +
+      tile('Промахи по вам', L.fmtInt(r.miss_in), '') +
+      (r.refl ? tile('Отражено', L.fmtInt(r.refl), 'не засчитано') : '') +
+      (r.bounty ? tile('Баунти', L.fmtIsk(r.bounty), 'начислений ' + L.fmtInt(r.bounty_n), 'bounty') : '') +
+      (r.ore_total ? tile('Руда', L.fmtInt(r.ore_total) + ' ед.', oreLine(r), 'ore') : '') +
+      (r.reps_in && Object.keys(r.reps_in).length ? tile('Вас починили', L.fmtInt(Object.keys(r.reps_in).reduce(function (a, k) { return a + r.reps_in[k].hp; }, 0)) + ' HP', '') : '') +
+      (r.unparsed ? tile('Нераспознано', L.fmtInt(r.unparsed), 'строк') : '') +
+      '</div><p class="small muted" style="margin:8px 0 0">Системы: ' + (Object.keys(r.systems || {}).map(function (k) { return secHtml(k) + esc(k); }).join(', ') || '—') + '</p></section>';
+    var hasCombat = r.out || r.in;
+    if (hasCombat) h += '<section class="panel"><h2>Урон во времени <span class="small muted">DPS, шаг 10 с</span></h2><div class="chart" id="dChart"></div></section>';
+    var wn = Object.keys(r.weapons || {}).filter(function (w) { return r.weapons[w].dmg > 0; });
+    if (wn.length > 1) h += '<section class="panel"><h2>DPS по оружию <span class="small muted">шаг 10 с</span></h2><div class="chart" id="dWChart"></div></section>';
+    if (r.ore_total || r.bounty) h += '<section class="panel"><h2>Руда и баунти по минутам</h2><div class="chart" id="dMChart"></div></section>';
+    h += '<section class="panel"><h2>Оружие</h2><div id="dW"></div></section>';
+    h += '<div class="grid2 gridgap"><section class="panel"><h2>Цели</h2><div id="dT"></div></section><section class="panel"><h2>Кто стрелял по вам</h2><div id="dA"></div></section></div>';
+    if (r.ore_total) h += '<section class="panel"><h2>Руда</h2><div id="dO"></div></section>';
+    h += '<div class="grid2 gridgap"><section class="panel"><h2>Ремонт</h2>' + repsHtml(T) + '</section><section class="panel"><h2>Нейтрализация и РЭБ</h2>' + ewarHtml(T) + '</section></div>';
+    h += '<section class="panel"><h2>Системы</h2>' + systemsTable('dsys', T, ['time', 'out', 'in', 'bounty', 'ore']) + '</section>';
+    b.innerHTML = h;
+    var ser = r.series || { step: 10, t0: r.t0, out: [], in: [], w: {} }, step = ser.step || 10;
+    var n = Math.floor((r.t1 - ser.t0) / step) + 1, xs = [];
+    for (var i = 0; i < n; i++) xs.push(ser.t0 + i * step);
+    var toDps = function (a) { return a.map(function (v) { return v / step; }); };
+    var dfmt = function (v) { return L.fmtNum(v, 1); };
+    if (hasCombat) lineChart($('dChart'), [
+      { name: 'Нанесено, DPS', color: 'var(--c-out)', values: toDps(L.denseSeries(ser.out, n)) },
+      { name: 'Получено, DPS', color: 'var(--c-in)', values: toDps(L.denseSeries(ser.in, n)) }
+    ], { xs: xs, xFmt: L.fmtTime, xFmtLong: L.fmtTimeS, yFmt: dfmt, label: 'Нанесённый и полученный DPS по 10-секундным интервалам' });
+    if (wn.length > 1) {
+      var pal = ['#2f6fde', '#d4483b', '#2f8f4e', '#b7791f', '#7a5bd6', '#0f9aa8', '#c2417a', '#6b7a1f'];
+      wn.sort(function (a, c) { return r.weapons[c].dmg - r.weapons[a].dmg; });
+      lineChart($('dWChart'), wn.slice(0, 8).map(function (w, i) {
+        return { name: w, color: pal[i % pal.length], values: toDps(L.denseSeries((ser.w || {})[w], n)) };
+      }), { xs: xs, xFmt: L.fmtTime, xFmtLong: L.fmtTimeS, yFmt: dfmt, label: 'DPS по каждому оружию' });
+    }
+    if (r.ore_total || r.bounty) {
+      var pm = r.per_min || [], m0 = r.t0 - r.t0 % 60, mn = Math.floor((r.t1 - m0) / 60) + 1, mx = [], ore = [], bty = [], idx = {};
+      pm.forEach(function (p) { idx[p[0]] = p; });
+      for (var k = 0; k < mn; k++) { var t = m0 + k * 60, p = idx[t]; mx.push(t); ore.push(p ? p[3] : 0); bty.push(p ? p[4] : 0); }
+      var ser2 = [];
+      if (r.ore_total) ser2.push({ name: 'Руда, ед./мин', color: 'var(--c-ore)', values: ore });
+      if (r.bounty) ser2.push({ name: 'Баунти, ISK/мин', color: 'var(--c-bounty)', values: bty });
+      lineChart($('dMChart'), ser2, { xs: mx, xFmt: L.fmtTime, yFmt: L.fmtInt, label: 'Руда и баунти по минутам',
+        xFmtLong: function (t) { return L.fmtDateTime(t) + '–' + L.fmtTime(t + 60); } });   // точка = целая минута
+    }
+    var wr = L.entries(r.weapons, 'dmg');
+    $('dW').innerHTML = table('dw', wr, [
+      { k: 'name', t: 'Оружие', l: 1, cls: 'name', f: function (x) { return icon(x.name) + esc(x.name) + catBadge(x.name); } },
+      { k: 'dmg', t: 'Урон', f: function (x) { return L.fmtInt(x.dmg); } },
+      { k: 'dps', t: 'DPS', f: function (x) { return L.fmtNum(x.dps, 1); } },
+      { k: 'peak', t: 'Пик 30 с', f: function (x) { return L.fmtNum(x.peak, 1); } },
+      { k: 'hits', t: 'Попаданий', f: function (x) { return L.fmtInt(x.hits); } },
+      { k: 'miss', t: 'Промахов', f: function (x) { return L.fmtInt(x.miss); } },
+      { k: 'avg_hit', t: 'Ср. удар', f: function (x) { return L.fmtNum(x.avg_hit, 1); } },
+      { k: 'max', t: 'Макс.', f: function (x) { return L.fmtInt(x.max); } },
+      { k: 'active', t: 'Работало', f: function (x) { return L.fmtDur(x.active); } },
+      { t: 'Качество', f: function (x) { return qbar(x.q); } }
+    ], { sort: { k: 'dmg', d: -1 }, empty: 'Стрельбы не было' }) + (wr.length ? qLegend() : '');
+    $('dT').innerHTML = table('dt', L.entries(r.targets, 'dmg'), [
+      { k: 'name', t: 'Цель', l: 1, cls: 'name', f: function (x) { return esc(x.name) + (x.ship ? ' <span class="muted small">' + esc(x.ship) + '</span>' : ''); } },
+      { k: 'dmg', t: 'Урон', f: function (x) { return L.fmtInt(x.dmg); } },
+      { k: 'hits', t: 'Попад.', f: function (x) { return L.fmtInt(x.hits); } },
+      { k: 'miss', t: 'Пром.', f: function (x) { return L.fmtInt(x.miss); } }
+    ], { sort: { k: 'dmg', d: -1 }, limit: 50, empty: 'Целей не было' });
+    $('dA').innerHTML = table('da', L.entries(r.attackers, 'dmg'), [
+      { k: 'name', t: 'Кто', l: 1, cls: 'name', f: function (x) { return esc(x.name) + (x.ship ? ' <span class="muted small">' + esc(x.ship) + '</span>' : ''); } },
+      { k: 'dmg', t: 'Урон', f: function (x) { return L.fmtInt(x.dmg); } },
+      { k: 'hits', t: 'Попал', f: function (x) { return L.fmtInt(x.hits); } },
+      { k: 'miss', t: 'Пром.', f: function (x) { return L.fmtInt(x.miss); } }
+    ], { sort: { k: 'dmg', d: -1 }, limit: 50, empty: 'По вам не стреляли' });
+    if (r.ore_total) $('dO').innerHTML = table('do', L.entries(r.ore).map(function (x) {
+      var v = volumeOf(x.name), p = priceOf(x.name);
+      return { name: x.name, units: x.value, m3: v === null ? null : v * x.value, isk: p === null ? null : p * x.value, cycles: (r.ore_cycles || {})[x.name] || 0, crit: (r.ore_crit || {})[x.name] || 0, residue: (r.ore_residue || {})[x.name] || 0 };
+    }), [
+      { k: 'name', t: 'Руда', l: 1, f: function (x) { return icon(x.name) + esc(x.name); } },
+      { k: 'units', t: 'Ед.', f: function (x) { return L.fmtInt(x.units); } },
+      { k: 'm3', t: 'м³', f: function (x) { return x.m3 === null ? '—' : L.fmtNum(x.m3, 1); } },
+      { k: 'cycles', t: 'Циклов', f: function (x) { return L.fmtInt(x.cycles); } },
+      { k: 'crit', t: 'Крит.', f: function (x) { return x.crit ? L.fmtInt(x.crit) : ''; } },
+      { k: 'residue', t: 'Отходы', f: function (x) { return x.residue ? L.fmtInt(x.residue) : ''; } },
+      { k: 'isk', t: 'ISK', f: function (x) { return x.isk === null ? '—' : L.fmtIsk(x.isk); } }
+    ], { sort: { k: 'units', d: -1 } });
+  }
+
+  // ---------- события управления ----------
+  document.querySelectorAll('#periodSeg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      S.period = b.getAttribute('data-p');
+      if (S.period === 'custom' && !S.from) {
+        S.from = L.toDateInput(L.addDays(L.dayStart(nowTs()), -6)); S.to = L.toDateInput(nowTs());
+        $('dFrom').value = S.from; $('dTo').value = S.to;
+      }
+      savePrefs(); render();
+    });
+  });
+  $('dFrom').value = S.from; $('dTo').value = S.to;
+  $('dFrom').addEventListener('change', function () { S.from = this.value; savePrefs(); render(); });
+  $('dTo').addEventListener('change', function () { S.to = this.value; savePrefs(); render(); });
+  $('who').addEventListener('change', function () { S.who = this.value; savePrefs(); render(); });
+  $('metric').addEventListener('change', function () { S.metric = this.value; savePrefs(); render(); });
+  $('priceMode').addEventListener('change', function () { S.priceMode = this.value; savePrefs(); render(); });
+  $('showShort').addEventListener('change', function () { S.showShort = this.checked; savePrefs(); render(); });
+  function bindTab(b) {
+    b.addEventListener('click', function () { S.tab = b.getAttribute('data-tab'); savePrefs(); if (S.tab === 'unparsed') loadUnparsed(); render(); });
+    b.addEventListener('keydown', function (e) {
+      var all = Array.prototype.filter.call(document.querySelectorAll('#tabs button'), function (x) { return !x.classList.contains('hidden'); });
+      var i = all.indexOf(b);
+      var j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? all.length - 1 : null;
+      if (j === null) return;
+      e.preventDefault(); j = (j + all.length) % all.length; all[j].click(); all[j].focus();
+    });
+  }
+  document.querySelectorAll('#tabs button').forEach(bindTab);
+  $('priceBtn').addEventListener('click', function () {
+    var btn = this; btn.disabled = true; S.priceMsg = '';
+    api('/api/prices/refresh', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(function (j) {
+      S.priceMsg = j.ok ? '' : (j.message || 'Ошибка');
+      // сразу перейти на частый опрос статуса (раз в 2 с), а не ждать минутного обновления
+      loadMeta().then(scheduleMeta, scheduleMeta);
+    }).catch(function () { S.priceMsg = 'Нет связи с приложением'; render(); });
+  });
+  $('copyUnp').addEventListener('click', function () {
+    var u = S.unparsed; if (!u) return;
+    var text = u.items.map(function (i) { return '×' + i.count + '\t(' + i.type + ') ' + i.text; }).join('\n');
+    var done = function (ok) { $('copyMsg').textContent = ok ? 'Скопировано' : 'Не удалось скопировать — выделите текст в таблице вручную'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+    else done(false);
+  });
+  var rt = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(rt);
+    rt = setTimeout(function () { render(); if (dlg.open && S.detail) renderDetail(S.detail); }, 150);
+  });
+
+  // ---------- модули: свои вкладки через window.ELW ----------
+  var MODTABS = {}, MODS = null, MOD = { msg: '', restart: false, waiting: false }, UPD = null, UPD_BUSY = false;
+  function addTab(def) {
+    if (!def || !/^[a-z][a-z0-9_]{1,31}$/.test(def.id) || MODTABS[def.id] || $('tab-' + def.id)) return null;
+    if (def.css) { var st = document.createElement('style'); st.textContent = def.css; document.head.appendChild(st); }
+    var btn = document.createElement('button');
+    btn.setAttribute('role', 'tab'); btn.type = 'button'; btn.id = 'tab-' + def.id;
+    btn.setAttribute('data-tab', def.id); btn.setAttribute('aria-controls', 'view-' + def.id);
+    btn.textContent = def.title || def.id;
+    $('tabs').insertBefore(btn, $('tab-unparsed'));
+    var panel = document.createElement('div');
+    panel.setAttribute('role', 'tabpanel'); panel.id = 'view-' + def.id; panel.className = 'hidden';
+    panel.setAttribute('aria-labelledby', btn.id);
+    panel.innerHTML = def.html || '';
+    document.querySelector('main').insertBefore(panel, $('view-unparsed'));
+    MODTABS[def.id] = def;
+    bindTab(btn);
+    if (def.init) { try { def.init(panel); } catch (e) { console.error('Модуль ' + def.id + ':', e); } }
+    render();
+    return panel;
+  }
+  window.ELW = { api: api, esc: esc, L: L, table: table, empty: empty, icon: icon, tile: tile, $: $, S: S,
+                 render: render, addTab: addTab, base: BASE, version: 1 };
+  function loadModules() {
+    if (AA_MODE) return Promise.resolve();
+    return api('/api/modules').then(function (j) {
+      if (j._status !== 200 || !j.ok) { MODS = []; return; }
+      MODS = j.modules || [];
+      var scripts = [];
+      MODS.forEach(function (m) {
+        if (!m.enabled || (m.kind === 'tracker' && !m.loaded)) return;
+        (m.web || []).forEach(function (f) { if (/\.js$/.test(f)) scripts.push(BASE + '/modules/' + m.id + '/' + f); });
+      });
+      return Promise.all(scripts.map(function (src) {
+        return new Promise(function (ok) {
+          var el = document.createElement('script');
+          el.src = src; el.onload = ok; el.onerror = function () { console.error('Не загрузился ' + src); ok(); };
+          document.body.appendChild(el);
+        });
+      }));
+    }, function () { MODS = []; }).then(function () {
+      if (!$('tab-' + S.tab) || $('tab-' + S.tab).classList.contains('hidden')) S.tab = 'overview';
+      render();
+    });
+  }
+  function renderModules() {
+    var box = $('modList');
+    if (MODS === null) { box.innerHTML = empty('Загрузка…'); return; }
+    if (!MODS.length) { box.innerHTML = empty('Модулей нет. Положите папку модуля в папку modules рядом с программой.'); return; }
+    box.innerHTML = table('modules', MODS.map(function (m) { return Object.assign({ state: m.error ? 'ошибка' : m.enabled ? 'включён' : 'выключен' }, m); }), [
+      { k: 'name', t: 'Модуль', l: 1, f: function (m) { return '<b>' + esc(m.name) + '</b><div class="small muted" style="white-space:normal;max-width:620px">' + esc(m.description) + '</div>'; } },
+      { k: 'version', t: 'Версия', f: function (m) { return esc(m.version); } },
+      { k: 'latest', t: 'На GitHub', l: 1, f: function (m) {
+        var u = updOf(m.id);
+        if (!u) return '<span class="muted">—</span>';
+        if (u.pending) return '<span style="color:var(--good)">' + esc(u.pending) + ' установлен, нужен перезапуск</span>';
+        if (u.update) return '<b style="color:var(--warn)">' + esc(u.latest) + '</b> <button type="button" class="btn primary" data-upd="' + esc(m.id) + '"' + (UPD_BUSY ? ' disabled' : '') + '>Обновить</button>';
+        if (u.needs_app) return '<span class="small muted">' + esc(u.latest) + ' — нужно приложение ' + esc(u.needs_app) + '</span>';
+        return u.latest ? '<span class="muted">' + esc(u.latest) + ' — последняя</span>' : '<span class="muted">—</span>';
+      } },
+      { k: 'state', t: 'Состояние', l: 1, f: function (m) {
+        return m.error ? '<span style="color:var(--warn)" title="' + esc(m.error) + '">ошибка при запуске</span>' : esc(m.state) + (m.kind === 'process' ? ' <span class="small muted">(отдельное окно)</span>' : '');
+      } },
+      { k: '', t: '', f: function (m) {
+        return '<button type="button" class="btn" data-mod="' + esc(m.id) + '" data-on="' + (m.enabled ? 0 : 1) + '">' + (m.enabled ? 'Выключить' : 'Включить') + '</button>';
+      } }
+    ], { sort: { k: 'name', d: 1 } }) + updNewModules() + (MOD.restart ? '<div class="controls" style="margin-top:10px"><button type="button" class="btn primary" id="modRestart"' +
+      (MOD.waiting ? ' disabled' : '') + '>Перезапустить сейчас</button></div>' : '');
+    $('modMsg').textContent = MOD.msg;
+    renderUpdBox();
+  }
+
+  // ---------- обновления с GitHub ----------
+  function updOf(id) { return UPD && UPD.modules ? UPD.modules.filter(function (u) { return u.id === id; })[0] : null; }
+  function updNewModules() {
+    var fresh = UPD && UPD.modules ? UPD.modules.filter(function (u) { return u.new || (u.pending && !MODS.some(function (m) { return m.id === u.id; })); }) : [];
+    if (!fresh.length) return '';
+    return '<h3 class="small muted" style="margin:14px 0 6px">Новые модули на GitHub</h3>' + table('modNew', fresh, [
+      { k: 'name', t: 'Модуль', l: 1, f: function (u) { return '<b>' + esc(u.name) + '</b><div class="small muted" style="white-space:normal;max-width:620px">' + esc(u.description || '') + '</div>'; } },
+      { k: 'latest', t: 'Версия', f: function (u) { return esc(u.latest); } },
+      { k: '', t: '', f: function (u) {
+        return u.pending ? '<span style="color:var(--good)">установлен, нужен перезапуск</span>'
+          : '<button type="button" class="btn" data-upd="' + esc(u.id) + '"' + (UPD_BUSY ? ' disabled' : '') + '>Установить</button>'; } }
+    ], { sort: { k: 'name', d: 1 } });
+  }
+  function renderUpdBox() {
+    var box = $('updBox'), u = UPD;
+    var n = u && u.updates ? u.updates : 0, appNew = !!(u && u.app && u.app.newer);
+    $('updBadge').textContent = String(n + (appNew ? 1 : 0));
+    $('updBadge').classList.toggle('hidden', !(n || appNew));
+    if (!box) return;
+    if (!u) { box.innerHTML = '<span class="small muted">Проверяю обновления…</span>'; return; }
+    if (!u.enabled) { box.innerHTML = '<span class="small muted">' + esc(u.error || 'Проверка обновлений выключена.') + '</span>'; return; }
+    var h = '<span class="small muted">Версия приложения <b>' + esc(u.app.current) + '</b>';
+    if (appNew) h += ' · <b style="color:var(--warn)">вышла ' + esc(u.app.latest) + '</b> — ' +
+      '<a href="' + esc(u.app.url) + '" target="_blank" rel="noopener">скачать с GitHub</a> (распакуйте поверх старой папки, настройки и история сохранятся)';
+    else if (u.app.latest) h += ' — последняя';
+    h += ' · проверено ' + (u.checked ? esc(L.fmtDateTime(u.checked)) : 'ещё не было') + '</span>';
+    if (u.error) h += ' <span class="small" style="color:var(--warn)">' + esc(u.error) + '</span>';
+    h += '<button type="button" class="btn" id="updCheck"' + (UPD_BUSY ? ' disabled' : '') + '>Проверить сейчас</button>';
+    if (n > 1) h += '<button type="button" class="btn primary" id="updAll"' + (UPD_BUSY ? ' disabled' : '') + '>Обновить все (' + n + ')</button>';
+    box.innerHTML = h;
+  }
+  function loadUpdates() {
+    if (AA_MODE) return;
+    api('/api/updates').then(function (j) {
+      if (j._status !== 200) return;
+      UPD = j;
+      if (S.tab === 'modules' && MODS) renderModules(); else renderUpdBox();
+    }, function () { });
+  }
+  function updPost(path, body) {
+    return api(path, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  }
+  function updInstall(body) {
+    UPD_BUSY = true; MOD.msg = 'Скачиваю и проверяю…'; renderModules();
+    updPost('/api/updates/install', body).then(function (j) {
+      UPD_BUSY = false;
+      MOD.msg = j.message || (j.ok ? 'Готово.' : 'Не получилось.');
+      if (j.restart) MOD.restart = true;
+      loadUpdates();
+      renderModules();
+    }, function () { UPD_BUSY = false; MOD.msg = 'Нет связи с трекером.'; renderModules(); });
+  }
+  $('view-modules').addEventListener('click', function (e) {
+    var ub = e.target.closest && e.target.closest('button[data-upd]');
+    if (ub) { updInstall({ id: ub.getAttribute('data-upd') }); return; }
+    if (e.target.id === 'updAll') { updInstall({ all: true }); return; }
+    if (e.target.id === 'updCheck') {
+      UPD_BUSY = true; renderUpdBox();
+      updPost('/api/updates/check').then(function (j) { UPD_BUSY = false; UPD = j; renderModules(); }, function () { UPD_BUSY = false; renderUpdBox(); });
+      return;
+    }
+    var b = e.target.closest && e.target.closest('button[data-mod]');
+    var post = function (path, body) {
+      return api(path, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    };
+    if (b) {
+      var id = b.getAttribute('data-mod'), on = b.getAttribute('data-on') === '1';
+      post('/api/modules/set', { id: id, enabled: on }).then(function (j) {
+        MOD.msg = j.message || ''; MOD.restart = !!j.ok;
+        MODS.forEach(function (m) { if (m.id === id && j.ok) m.enabled = on; });
+        renderModules();
+      });
+    } else if (e.target.id === 'modRestart') {
+      MOD.waiting = true; MOD.msg = 'Перезапускаю… страница обновится сама.'; renderModules();
+      post('/api/restart').then(function () {
+        var seenDown = false, tries = 0;
+        var wait = setInterval(function () {
+          tries++;
+          fetch(BASE + '/api/live', { cache: 'no-store' }).then(function (r) {
+            if (r.ok && seenDown) { clearInterval(wait); location.reload(); }
+          }, function () { seenDown = true; });
+          if (tries > 60) { clearInterval(wait); MOD.waiting = false; MOD.msg = 'Трекер не поднялся сам — запустите приложение заново.'; renderModules(); }
+        }, 1000);
+      });
+    }
+  });
+
+  // ---------- загрузка данных ----------
+  function setStatus(cls, text) {
+    var st = $('status'); st.querySelector('.dot').className = 'dot ' + cls; st.lastChild.textContent = text;
+  }
+  function loadHistory() {
+    return api('/api/history').then(function (j) { if (j.sessions) { S.history = j.sessions; } });
+  }
+  function loadMeta() {
+    return api('/api/meta').then(function (j) { if (j.types) { S.meta = j; render(); } });
+  }
+  var metaTimer = null;
+  function scheduleMeta() {
+    clearTimeout(metaTimer);
+    var running = S.meta && S.meta.price_status && S.meta.price_status.state === 'running';
+    metaTimer = setTimeout(function () { loadMeta().then(scheduleMeta, scheduleMeta); }, running ? 2000 : 60000);
+  }
+  function tick() {
+    return api('/api/live').then(function (j) {
+      if (!j.now) throw new Error(j.message || 'нет данных');
+      var needHist = j.history_count !== S.histCount;
+      S.live = j; S.lastOk = Date.now();
+      var p = j.progress || {};
+      if (!j.initial_done) setStatus('warn', 'импорт логов… ' + (p.files_done || 0) + '/' + (p.files_total || 0));
+      else if (!AA_MODE && !j.logs_dir_exists) setStatus('bad', 'папка логов не найдена');
+      else setStatus('ok', j.sessions.length ? 'идёт сессия' : 'наблюдение');
+      $('updated').textContent = 'обновлено ' + L.fmtTimeS(j.now);
+      if (S.unparsed && S.unparsed.total !== j.unparsed_total) loadUnparsed();
+      if (needHist) { S.histCount = j.history_count; return loadHistory().then(render); }
+      render();
+    }).catch(function () {
+      setStatus('bad', 'нет связи с приложением — запущено ли оно?');
+    });
+  }
+  var csvLink = document.querySelector('a[href="/history.csv"]');
+  if (csvLink) csvLink.href = BASE + '/history.csv';
+  if (CFG.title) document.querySelector('header.top h1').textContent = CFG.title;
+  if (AA_MODE) {
+    $('tab-unparsed').classList.add('hidden');
+    $('tab-modules').classList.add('hidden');              // модули есть только в настольном приложении
+    if (S.tab === 'unparsed' || S.tab === 'modules' || !$('tab-' + S.tab)) S.tab = 'overview';
+  }
+  render();
+  loadModules().then(loadUpdates);
+  setInterval(loadUpdates, 10 * 60 * 1000);
+  Promise.all([loadMeta(), loadHistory()]).then(tick, tick).then(scheduleMeta);
+  setInterval(function () { if (!document.hidden) tick(); }, 4000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "id": "alliance_auth",
+  "name": "Alliance Auth",
+  "version": "1.0.0",
+  "entry": "aa.py",
+  "default": true,
+  "description": "Отправляет итоги боевых сессий в плагин Fleet Watch на вашем сервере Alliance Auth. Работает, только если указаны адрес сервера и личный ключ (connect_aa.bat). Флот через AA не читает."
+}
