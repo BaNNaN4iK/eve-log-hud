@@ -40,7 +40,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Iterable, List, Optional, Tuple
 
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 UPDATE_REPO = "BaNNaN4iK/eve-log-hud"                     # официальный репозиторий для обновлений: «владелец/репозиторий»
 APP_NAME = "EVE Log Watcher"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

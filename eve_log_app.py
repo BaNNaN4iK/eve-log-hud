@@ -114,9 +114,47 @@ WAIT_PAGE = """<!doctype html><meta charset="utf-8"><title>EVE Log HUD</title>
 <div style="text-align:center"><div style="font-size:20px;color:#e8edf2;margin-bottom:8px">EVE Log HUD</div>%s</div></body>"""
 
 
+def unblock_own_files() -> int:
+    """Снять с файлов программы пометку «скачано из интернета» (поток Zone.Identifier).
+
+    Windows ставит её на всё, что распаковано из скачанного архива, а .NET отказывается загружать помеченные
+    библиотеки — без этого окно приложения (pywebview → pythonnet → Python.Runtime.dll) падает при запуске.
+    Трогаем только свои файлы: папку программы. Возвращает, сколько пометок снято.
+    """
+    if not FROZEN or sys.platform != "win32":
+        return 0
+    n = 0
+    for root in {RES, HERE}:
+        for dp, _, fns in os.walk(root):
+            for fn in fns:
+                if fn.lower().endswith((".dll", ".exe", ".pyd")):
+                    try:
+                        os.remove(os.path.join(dp, fn) + ":Zone.Identifier")
+                        n += 1
+                    except OSError:
+                        pass
+    return n
+
+
 def run_window(argv: list) -> int:
-    import webview
     data = data_dir()
+    try:
+        return _run_window(data)
+    except Exception as e:                                       # окно не открылось — показать страницу в браузере
+        try:
+            with open(os.path.join(data, "window_error.log"), "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} окно не открылось: {e!r}\n")
+        except OSError:
+            pass
+        p = port(data)
+        wait_server(p, 25)
+        import webbrowser
+        webbrowser.open(f"http://127.0.0.1:{p}/")
+        return 1
+
+
+def _run_window(data: str) -> int:
+    import webview
     p = port(data)
     url = f"http://127.0.0.1:{p}/"
     try:
@@ -258,6 +296,8 @@ def already_running() -> bool:
 
 def main() -> int:
     argv = sys.argv[1:]
+    if not argv or argv[0] == "--window":
+        unblock_own_files()
     if argv and argv[0] == "--tracker":
         return run_tracker(argv[1:])
     if argv and argv[0] == "--overlay":
