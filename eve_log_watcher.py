@@ -40,7 +40,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Iterable, List, Optional, Tuple
 
-VERSION = "2.2.1"
+VERSION = "2.3.0"
 UPDATE_REPO = "BaNNaN4iK/eve-log-hud"                     # официальный репозиторий для обновлений: «владелец/репозиторий»
 APP_NAME = "EVE Log Watcher"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,7 +54,7 @@ log = logging.getLogger("eve_log_watcher")
 # ---------------------------------------------------------------------------
 
 DEFAULT_CONFIG = {
-    "logs_dir": "",                    # пусто = найти автоматически (Документы, OneDrive)
+    "logs_dir": "",                    # пусто = найти автоматически (Windows: Документы, OneDrive; Linux: Steam Proton, Wine)
     "session_gap_seconds": 300,
     "min_session_seconds": 20,
     "poll_seconds": 5,
@@ -152,12 +152,104 @@ def documents_candidates() -> List[str]:
     return out
 
 
+EVE_STEAM_APPID = "8500"
+
+
+def steam_libraries(home: str) -> List[str]:
+    """Папки библиотек Steam в Linux: стандартная, Flatpak, Snap и дополнительные из libraryfolders.vdf."""
+    roots = [os.path.join(home, ".steam", "steam"), os.path.join(home, ".steam", "root"),
+             os.path.join(home, ".local", "share", "Steam"),
+             os.path.join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
+             os.path.join(home, "snap", "steam", "common", ".local", "share", "Steam")]
+    libs: List[str] = []
+    for r in roots:
+        if not os.path.isdir(r):
+            continue
+        libs.append(r)
+        try:
+            with open(os.path.join(r, "steamapps", "libraryfolders.vdf"), encoding="utf-8", errors="replace") as f:
+                libs += re.findall(r'"path"\s+"([^"]+)"', f.read())
+        except OSError:
+            pass
+    out: List[str] = []
+    for lib in libs:
+        real = os.path.realpath(lib)
+        if real not in out:
+            out.append(real)
+    return out
+
+
+def wine_logs_candidates(home: Optional[str] = None) -> List[str]:
+    """Где лежат логи EVE в Linux: Steam Proton (compatdata/8500), Wine, Lutris, Bottles."""
+    import glob
+    home = home or os.path.expanduser("~")
+    tail = [os.path.join(docs, "EVE", "logs", "Gamelogs") for docs in ("Documents", "My Documents")]
+    out: List[str] = []
+    for lib in steam_libraries(home):
+        users = os.path.join(lib, "steamapps", "compatdata", EVE_STEAM_APPID, "pfx", "drive_c", "users")
+        out += [os.path.join(users, "steamuser", t) for t in tail]
+        out += [p for t in tail for p in glob.glob(os.path.join(users, "*", t))]
+    prefixes = ([os.path.join(home, ".wine")] + glob.glob(os.path.join(home, "Games", "*"))
+                + glob.glob(os.path.join(home, ".local", "share", "bottles", "bottles", "*"))
+                + glob.glob(os.path.join(home, ".var", "app", "com.usebottles.bottles", "data", "bottles", "bottles", "*")))
+    for pfx in prefixes:
+        out += [p for t in tail for p in glob.glob(os.path.join(pfx, "drive_c", "users", "*", t))]
+    seen: List[str] = []
+    for p in out:
+        if p not in seen:
+            seen.append(p)
+    return seen
+
+
+def logs_candidates() -> List[str]:
+    """Все возможные папки Gamelogs для этой системы (существующие и нет)."""
+    if os.name == "nt":
+        return [os.path.join(d, "EVE", "logs", "Gamelogs") for d in documents_candidates()]
+    return wine_logs_candidates() + [os.path.join(d, "EVE", "logs", "Gamelogs") for d in documents_candidates()]
+
+
+def logs_dir_info(path: str) -> dict:
+    """Есть ли папка, сколько в ней логов и когда был последний (для выбора и для страницы настроек)."""
+    info = {"path": path, "exists": os.path.isdir(path), "files": 0, "latest": 0}
+    if info["exists"]:
+        try:
+            with os.scandir(path) as it:
+                for e in it:
+                    if e.name.lower().endswith(".txt") and e.is_file():
+                        info["files"] += 1
+                        info["latest"] = max(info["latest"], int(e.stat().st_mtime))
+        except OSError:
+            pass
+    return info
+
+
+def found_logs_dirs() -> List[dict]:
+    """Существующие папки логов, свежие первыми."""
+    found = [logs_dir_info(p) for p in logs_candidates()]
+    found = [f for f in found if f["exists"]]
+    found.sort(key=lambda f: (-f["latest"], -f["files"]))
+    return found
+
+
 def detect_logs_dir() -> str:
-    cands = [os.path.join(d, "EVE", "logs", "Gamelogs") for d in documents_candidates()]
-    for p in cands:
-        if os.path.isdir(p):
-            return p
+    found = found_logs_dirs()
+    if found:
+        return found[0]["path"]                          # если папок несколько (Proton + Wine) — где логи свежее
+    cands = logs_candidates()
     return cands[0] if cands else os.path.join(os.path.expanduser("~"), "Documents", "EVE", "logs", "Gamelogs")
+
+
+def normalize_logs_path(raw: str) -> str:
+    """Путь, который ввёл человек → папка Gamelogs. Понимает «…/Documents», «…/EVE», «…/EVE/logs» и кавычки."""
+    p = (raw or "").strip().strip('"').strip("'").strip()
+    if not p:
+        return ""
+    p = os.path.normpath(os.path.expandvars(os.path.expanduser(p)))
+    for sub in ((), ("Gamelogs",), ("logs", "Gamelogs"), ("EVE", "logs", "Gamelogs")):
+        cand = os.path.join(p, *sub) if sub else p
+        if os.path.basename(cand).lower() == "gamelogs" and os.path.isdir(cand):
+            return cand
+    return p
 
 
 def resolve_logs_dir(cfg: dict) -> str:
@@ -1654,6 +1746,53 @@ class App:
             return {"ok": False, "message": f"Не удалось перезапустить: {e}"}
         return {"ok": True, "message": "Перезапускаю…"}
 
+    def logs_settings(self, body=None) -> dict:
+        """Вкладка «Настройки»: какая папка логов сейчас, что найдено автоматически; проверить или сохранить свою.
+
+        body = None — только показать; {"path": "...", "save": false} — проверить; {"path": "...", "save": true} — сохранить
+        в config.json (пустой путь = снова искать автоматически). Новая папка начинает читаться после перезапуска трекера.
+        """
+        configured = (self.cfg.get("logs_dir") or "").strip()
+        out = {"ok": True, "configured": configured, "current": logs_dir_info(self.watcher.logs_dir),
+               "found": found_logs_dirs()[:8], "platform": sys.platform}
+        if body is None:
+            return out
+        if not isinstance(body, dict) or not isinstance(body.get("path", ""), str):
+            return {"ok": False, "message": "Неверный запрос"}
+        raw = body.get("path", "")
+        if len(raw) > 1000:
+            return {"ok": False, "message": "Слишком длинный путь"}
+        path = normalize_logs_path(raw)
+        check = logs_dir_info(path) if path else logs_dir_info(detect_logs_dir())
+        out["check"] = check
+        if path and not check["exists"]:
+            out.update(ok=False, message=f"Папка не найдена: {path}")
+            return out
+        if not check["files"]:
+            out["warning"] = ("В папке нет логов (.txt). Проверьте, что это EVE/logs/Gamelogs, и включите в игре "
+                              "Esc → Чат → «Вести журнал в файле».")
+        if not body.get("save"):
+            out["message"] = f"Папка найдена, логов: {check['files']}."
+            return out
+        cfg_path = os.path.join(self.data_dir, "config.json")
+        try:
+            with open(cfg_path, encoding="utf-8-sig") as f:
+                user = json.load(f)
+            if not isinstance(user, dict):
+                user = {}
+        except (OSError, ValueError):
+            user = {}
+        user["logs_dir"] = path
+        try:
+            atomic_write_json(cfg_path, user, indent=2)
+        except OSError as e:
+            return {"ok": False, "message": f"Не удалось сохранить config.json: {e}"}
+        self.cfg["logs_dir"] = path
+        out.update(configured=path, restart=True,
+                   message=("Сохранено: " + path if path else "Сохранено: искать папку автоматически")
+                   + ". Перезапустите трекер, чтобы читать логи оттуда.")
+        return out
+
     def updates(self, action: str, body=None) -> Tuple[int, dict]:
         """Вкладка «Модули»: состояние обновлений, проверить сейчас, установить модуль (или все обновления)."""
         u = self.updater
@@ -1794,6 +1933,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, rec)
             if path == "/api/meta":
                 return self._json(200, app.meta())
+            if path == "/api/settings/logs":
+                return self._json(200, app.logs_settings())
             if path == "/api/updates":
                 return self._json(*app.updates("status"))
             if path == "/api/modules":
@@ -1859,6 +2000,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self.app.set_module(body))
         if u.path == "/api/restart":
             return self._json(200, self.app.restart())
+        if u.path == "/api/settings/logs":
+            return self._json(200, self.app.logs_settings(body if body is not None else {}))
         if u.path == "/api/updates/check":
             return self._json(*self.app.updates("check"))
         if u.path == "/api/updates/install":
@@ -2213,7 +2356,7 @@ def run_app(cfg: dict, data_dir: str) -> int:
 
     watcher = Watcher(cfg, data_dir)
     log.info("%s %s запущен. Папка логов: %s%s", APP_NAME, VERSION, watcher.logs_dir,
-             "" if os.path.isdir(watcher.logs_dir) else " (НЕ НАЙДЕНА — укажите logs_dir в config.json)")
+             "" if os.path.isdir(watcher.logs_dir) else " (НЕ НАЙДЕНА — укажите её на вкладке «Настройки» или в config.json, logs_dir)")
     online = Online(data_dir, cfg) if cfg["online_enabled"] else None
     app = App(cfg, data_dir, watcher, online)
     mods = modkit.activate(sys.modules[__name__], app, modkit.modules_dir(SCRIPT_DIR), stop)

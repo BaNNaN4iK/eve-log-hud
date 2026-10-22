@@ -179,7 +179,7 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
     <button role="tab" type="button" data-tab="bounty" id="tab-bounty" aria-controls="view-bounty">Баунти</button>
     <button role="tab" type="button" data-tab="sessions" id="tab-sessions" aria-controls="view-sessions">Сессии</button>
     <button role="tab" type="button" data-tab="unparsed" id="tab-unparsed" aria-controls="view-unparsed">Нераспознанное <span class="badge" id="unpBadge">0</span></button>
-    <button role="tab" type="button" data-tab="modules" id="tab-modules" aria-controls="view-modules">Модули <span class="badge warn hidden" id="updBadge" title="Есть обновления">0</span></button>
+    <button role="tab" type="button" data-tab="modules" id="tab-modules" aria-controls="view-modules">Настройки <span class="badge warn hidden" id="updBadge" title="Есть обновления">0</span></button>
   </nav>
 
   <main>
@@ -277,6 +277,21 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
       </section>
     </div>
     <div role="tabpanel" id="view-modules" aria-labelledby="tab-modules" class="hidden">
+      <section class="panel"><h2>Папка логов</h2>
+        <p class="small muted" style="margin-top:0">Где игра пишет боевые логи — папка <code>EVE/logs/Gamelogs</code> в «Документах».
+          Обычно находится сама (Windows: «Документы», OneDrive; Linux: Steam Proton, Wine, Lutris, Bottles). Если нет — вставьте путь сюда.</p>
+        <div id="logsCur" class="small"></div>
+        <div class="controls" style="margin-top:8px">
+          <label class="sr" for="logsPath">Путь к папке логов</label>
+          <input id="logsPath" type="text" spellcheck="false" autocomplete="off" style="flex:1 1 420px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:13px ui-monospace,Consolas,monospace"
+            placeholder="например: C:\Users\Имя\Documents\EVE\logs\Gamelogs или ~/.steam/steam/steamapps/compatdata/8500/pfx/drive_c/users/steamuser/Documents/EVE/logs/Gamelogs">
+          <button type="button" class="btn" id="logsCheck">Проверить</button>
+          <button type="button" class="btn primary" id="logsSave">Сохранить</button>
+          <button type="button" class="btn" id="logsAuto" title="Забыть свой путь и искать папку автоматически">Искать автоматически</button>
+        </div>
+        <div class="small" id="logsMsg" role="status" aria-live="polite" style="margin-top:6px"></div>
+        <div id="logsFound"></div>
+      </section>
       <section class="panel"><h2>Модули</h2>
         <p class="small muted" style="margin-top:0">Каждая возможность приложения — отдельный модуль. Выключенный модуль не запускается и не показывает свою вкладку.
           Установить модуль — положить его папку в папку модулей, удалить — убрать папку. Изменения вступают в силу после перезапуска.</p>
@@ -861,7 +876,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     if (S.tab === 'bounty') renderBounty(sel, T);
     if (S.tab === 'sessions') renderSessions(sel);
     if (S.tab === 'unparsed') renderUnparsed();
-    if (S.tab === 'modules') renderModules();
+    if (S.tab === 'modules') { renderModules(); loadLogsSettings(); }
     if (MODTABS[S.tab] && MODTABS[S.tab].render) {
       try { MODTABS[S.tab].render(); } catch (e) { console.error('Модуль ' + S.tab + ':', e); }
     }
@@ -897,7 +912,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     var list = (lv.sessions || []).filter(function (s) { return !S.who || s.who === S.who; });
     var h = '';
     if (!AA_MODE && !lv.logs_dir_exists) {
-      h += '<div class="notice warn">Папка логов не найдена: <code>' + esc(lv.logs_dir) + '</code>. Укажите путь в <code>config.json</code> (параметр <code>logs_dir</code>) и перезапустите приложение.</div>';
+      h += '<div class="notice warn">Папка логов не найдена: <code>' + esc(lv.logs_dir) + '</code>. Укажите её на вкладке <a href="#" data-goto="modules">«Настройки»</a> и перезапустите трекер.</div>';
     }
     if (!list.length) {
       var cs = lv.cur_sys || {}, where = Object.keys(cs).filter(function (k) { return !S.who || k === S.who; }).map(function (k) { return k + ' — ' + cs[k]; }).join(', ');
@@ -1441,6 +1456,61 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     $('modMsg').textContent = MOD.msg;
     renderUpdBox();
   }
+
+  // ---------- папка логов ----------
+  var LOGS = { at: 0, data: null };
+  function logsLine(i) {
+    return '<code>' + esc(i.path) + '</code> — ' + (i.exists ? 'логов: ' + esc(L.fmtInt(i.files)) +
+      (i.latest ? ', последний ' + esc(L.fmtDateTime(i.latest)) : '') : '<span style="color:var(--warn)">папки нет</span>');
+  }
+  function renderLogs() {
+    var d = LOGS.data;
+    if (!d) return;
+    $('logsCur').innerHTML = 'Сейчас читаю: ' + logsLine(d.current) + (d.configured ? ' <span class="muted">(указана вручную)</span>' : ' <span class="muted">(найдена автоматически)</span>');
+    if (document.activeElement !== $('logsPath') && !$('logsPath').value) $('logsPath').value = d.configured || '';
+    var others = (d.found || []).filter(function (f) { return f.path !== d.current.path; });
+    $('logsFound').innerHTML = others.length ? '<div class="small muted" style="margin-top:8px">Найдены ещё папки — нажмите, чтобы подставить:</div>' +
+      others.map(function (f) { return '<div class="small"><a href="#" data-logpath="' + esc(f.path) + '">' + logsLine(f) + '</a></div>'; }).join('') : '';
+  }
+  function loadLogsSettings(force) {
+    if (AA_MODE || (!force && Date.now() - LOGS.at < 15000)) return;
+    LOGS.at = Date.now();
+    api('/api/settings/logs').then(function (j) { if (j.ok) { LOGS.data = j; renderLogs(); } }, function () { });
+  }
+  function logsPost(path, save) {
+    var msg = $('logsMsg');
+    msg.textContent = save ? 'Сохраняю…' : 'Проверяю…';
+    api('/api/settings/logs', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path, save: save }) }).then(function (j) {
+      var h = '<span style="color:' + (j.ok ? 'var(--good)' : 'var(--bad)') + '">' + esc(j.message || (j.ok ? 'Готово.' : 'Не получилось.')) + '</span>';
+      if (j.check && j.check.exists) h += '<div class="muted">' + logsLine(j.check) + '</div>';
+      if (j.warning) h += '<div style="color:var(--warn)">' + esc(j.warning) + '</div>';
+      msg.innerHTML = h;
+      if (j.restart) { MOD.restart = true; MOD.msg = 'Папка логов изменена — нажмите «Перезапустить сейчас».'; renderModules(); }
+      if (j.ok && j.check && j.check.path && path) $('logsPath').value = j.check.path;
+      if (j.configured !== undefined) { LOGS.data = Object.assign(LOGS.data || {}, { configured: j.configured }); renderLogs(); }
+    }, function () { msg.textContent = 'Нет связи с трекером.'; });
+  }
+  $('logsCheck').addEventListener('click', function () { logsPost($('logsPath').value, false); });
+  $('logsSave').addEventListener('click', function () {
+    if (!$('logsPath').value.trim()) { $('logsMsg').textContent = 'Вставьте путь или нажмите «Искать автоматически».'; return; }
+    logsPost($('logsPath').value, true);
+  });
+  $('logsAuto').addEventListener('click', function () { $('logsPath').value = ''; logsPost('', true); });
+  $('logsPath').addEventListener('keydown', function (e) { if (e.key === 'Enter') logsPost(this.value, false); });
+  $('logsFound').addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[data-logpath]');
+    if (!a) return;
+    e.preventDefault();
+    $('logsPath').value = a.getAttribute('data-logpath');
+    logsPost($('logsPath').value, false);
+  });
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[data-goto]');
+    if (!a) return;
+    e.preventDefault();
+    S.tab = a.getAttribute('data-goto'); savePrefs(); render();
+  });
 
   // ---------- обновления с GitHub ----------
   function updOf(id) { return UPD && UPD.modules ? UPD.modules.filter(function (u) { return u.id === id; })[0] : null; }

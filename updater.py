@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 import urllib.error
@@ -182,7 +183,8 @@ class Updater:
                 "kind": lm.info()["kind"] if lm else "",
             })
         app_latest = ((self.index or {}).get("app_version") or (rel or {}).get("tag", "")).lstrip("vV") if rel else ""
-        app_zip = next((n for n in (rel or {}).get("assets", {}) if re.fullmatch(r"EveLogHUD-[\d.]+\.zip", n)), "")
+        pattern = r"EveLogHUD-[\d.]+-linux\.tar\.gz" if sys.platform.startswith("linux") else r"EveLogHUD-[\d.]+\.zip"
+        app_zip = next((n for n in (rel or {}).get("assets", {}) if re.fullmatch(pattern, n)), "")
         return {
             "ok": True, "enabled": bool(self.repo), "repo": self.repo, "checked": self.checked, "error": self.error,
             "release": {"tag": rel.get("tag"), "url": rel.get("url"), "published": rel.get("published")} if rel else None,

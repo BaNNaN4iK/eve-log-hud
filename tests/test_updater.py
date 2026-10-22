@@ -50,7 +50,8 @@ class Remote:
         self.index = {"app_version": app_version, "modules": index}
         iurl = f"https://github.com/me/hud/releases/download/{tag}/modules-index.json"
         assets.append({"name": "modules-index.json", "browser_download_url": iurl})
-        assets.append({"name": "EveLogHUD-2.3.0.zip", "browser_download_url": "https://github.com/me/hud/releases/download/v2.3.0/EveLogHUD-2.3.0.zip"})
+        for app_file in ("EveLogHUD-2.3.0.zip", "EveLogHUD-2.3.0-linux.tar.gz"):
+            assets.append({"name": app_file, "browser_download_url": "https://github.com/me/hud/releases/download/v2.3.0/" + app_file})
         self.release = {"tag_name": tag, "html_url": "https://github.com/me/hud/releases/tag/" + tag, "assets": assets}
         self.iurl = iurl
 
@@ -109,7 +110,9 @@ class TestUpdater(unittest.TestCase):
         self.assertTrue(rows["reprocess"]["new"])
         self.assertEqual(st["updates"], 1)
         self.assertEqual((st["app"]["latest"], st["app"]["newer"]), ("2.3.0", True))
-        self.assertTrue(st["app"]["download"].endswith("EveLogHUD-2.3.0.zip"))
+        import sys
+        self.assertTrue(st["app"]["download"].endswith("EveLogHUD-2.3.0-linux.tar.gz" if sys.platform.startswith("linux")
+                                                       else "EveLogHUD-2.3.0.zip"))           # архив для своей системы
 
         res = u.install("fleet")
         self.assertEqual((res["from"], res["to"]), ("1.0.0", "1.1.0"))

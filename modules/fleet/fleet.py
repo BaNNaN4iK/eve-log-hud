@@ -4,7 +4,7 @@
 
 Только стандартная библиотека. Работает, когда вошедший персонаж — босс флота: состав флота игра отдаёт
 только боссу. Всё хранится на этом компьютере, в папке данных трекера:
-  esi_token.json   — кто вошёл и токен обновления (зашифрован средствами Windows, DPAPI)
+  esi_token.json   — кто вошёл и токен обновления (Windows: зашифрован DPAPI; Linux: файл с правами 600)
   fleet_names.json — названия кораблей, систем и имена пилотов (кэш)
   fleets/<id>.json — по файлу на флот: состав, время во флоте, маршруты, отметки ФК
 
@@ -214,6 +214,11 @@ class EsiAuth:
         except Exception as e:
             raise FleetError("EVE вернул токен, который не удалось разобрать.") from e
         _write(self.path, {"character_id": self.character_id, "character": self.character, "refresh": protect(self.refresh)})
+        if os.name != "nt":                                  # Linux: шифрования Windows нет — файл читает только владелец
+            try:
+                os.chmod(self.path, 0o600)
+            except OSError:
+                pass
 
     def finish(self, code: str, state: str) -> str:
         """Вторая половина входа (после возврата из браузера). Возвращает имя персонажа."""

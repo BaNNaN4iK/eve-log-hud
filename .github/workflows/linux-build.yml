@@ -1,0 +1,47 @@
+name: linux-build
+
+# Архив для Linux собирается здесь (собрать его можно только в Linux) и прикладывается к выпуску.
+# Запускается сам при публикации выпуска; вручную — Actions → linux-build → Run workflow (с тегом выпуска).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Тег выпуска, например v2.3.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Системные библиотеки (Tk для оверлея, значок в трее)
+        run: sudo apt-get update && sudo apt-get install -y python3-tk libayatana-appindicator3-1
+      - name: Тесты
+        working-directory: tests
+        env:
+          PYTHONUTF8: "1"
+        run: python -m unittest
+      - name: Сборка
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pywebview pystray pillow
+          python build_app.py
+          ls -la dist
+      - name: Приложить к выпуску
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/EveLogHUD-*-linux.tar.gz --clobber

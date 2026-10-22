@@ -10,7 +10,8 @@ EVE Log HUD — настольное приложение: значок в тр�
   EveLogHUD.exe --overlay   — оверлей поверх игры
 
 Данные (настройки, история сессий, ключ Alliance Auth) лежат отдельно от программы:
-  папка data рядом с exe, если она есть (переносной режим), иначе %LOCALAPPDATA%\\EveLogHUD.
+  папка data рядом с exe, если она есть (переносной режим), иначе %LOCALAPPDATA%\\EveLogHUD
+  (в Linux — ~/.local/share/EveLogHUD).
 При запуске из исходников (python eve_log_app.py) — рядом со скриптами, как раньше.
 """
 import json
@@ -38,7 +39,10 @@ def data_dir() -> str:
     portable = os.path.join(HERE, "data")
     if os.path.isdir(portable):
         return portable
-    return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "EveLogHUD")
+    if sys.platform == "win32":
+        return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "EveLogHUD")
+    xdg = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(xdg, "EveLogHUD")
 
 
 def port(data: str) -> int:
@@ -242,7 +246,11 @@ class Shell:
         self.set_overlay(self.prefs["overlay"])
 
     def open_data(self, *_):
-        os.startfile(self.data)
+        if sys.platform == "win32":
+            os.startfile(self.data)
+        else:
+            subprocess.Popen(["xdg-open", self.data], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
 
     def watchdog(self, stop: threading.Event):
         """Трекер должен работать всё время, пока приложение запущено."""
@@ -263,15 +271,18 @@ class Shell:
             icon.stop()
 
     def run(self) -> int:
-        import pystray
-        from PIL import Image
         self.ensure_tracker()
         self.open_window()
         if self.prefs["overlay"]:
             self.set_overlay(True)
         stop = threading.Event()
         threading.Thread(target=self.watchdog, args=(stop,), daemon=True).start()
-        image = Image.open(os.path.join(RES, "app.ico"))
+        try:
+            import pystray
+            from PIL import Image
+            image = Image.open(os.path.join(RES, "app.ico"))
+        except Exception as e:                               # Linux без значков в трее — работаем без значка
+            return self.run_without_tray(stop, e)
         menu = pystray.Menu(
             pystray.MenuItem("Открыть окно", self.open_window, default=True),
             pystray.MenuItem("Оверлей поверх игры", self.toggle_overlay, checked=lambda item: self.alive("overlay"),
@@ -282,16 +293,44 @@ class Shell:
         icon = pystray.Icon("EveLogHUD", image, APP_NAME, menu)
         try:
             icon.run()
+        except Exception as e:
+            return self.run_without_tray(stop, e)
         finally:
             stop.set()
         return 0
 
+    def run_without_tray(self, stop: threading.Event, why) -> int:
+        """Нет области уведомлений (некоторые окружения Linux): трекер и окно работают, выход — Ctrl+C или kill."""
+        print(f"{APP_NAME}: значок в трее недоступен ({why}). Работаю без него; страница: http://127.0.0.1:{self.port}/",
+              flush=True)
+        try:
+            while not stop.wait(5):
+                pass
+        except KeyboardInterrupt:
+            pass
+        stop.set()
+        self.quit()
+        return 0
+
+
+_LOCK = None
+
 
 def already_running() -> bool:
     """Второй запуск не плодит значки: просто открывает окно у уже работающего приложения."""
-    import ctypes
-    ctypes.windll.kernel32.CreateMutexW(None, False, "EveLogHUDShell")
-    return ctypes.windll.kernel32.GetLastError() == 183
+    global _LOCK
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.kernel32.CreateMutexW(None, False, "EveLogHUDShell")
+        return ctypes.windll.kernel32.GetLastError() == 183
+    import fcntl
+    os.makedirs(data_dir(), exist_ok=True)
+    _LOCK = open(os.path.join(data_dir(), ".shell.lock"), "w")
+    try:
+        fcntl.flock(_LOCK, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return True
+    return False
 
 
 def main() -> int:
@@ -304,8 +343,8 @@ def main() -> int:
         return run_overlay(argv[1:])
     if argv and argv[0] == "--window":
         return run_window(argv[1:])
-    if sys.platform != "win32":
-        print("Приложение работает только в Windows.")
+    if sys.platform not in ("win32", "linux"):
+        print("Приложение работает в Windows и Linux.")
         return 1
     if already_running():
         spawn("window", data_dir())

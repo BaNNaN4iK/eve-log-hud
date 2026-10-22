@@ -591,7 +591,8 @@ C_OUT, C_IN, C_REP = "#5ad1ba", "#ff8a7a", "#7ab8ff"
 C_ORE, C_ISK = "#e8c46a", "#b9e07a"
 BIG_KEYS = ("dps", "dps_in", "hps", "bounty", "bounty_h")
 TOTAL_OF = {"hps": "rep", "bounty": "bounty", "bounty_h": "bounty"}               # число показываем, только если по нему что-то набежало
-FONT = "Segoe UI"
+WIN = sys.platform == "win32"
+FONT = "Segoe UI" if WIN else "DejaVu Sans"
 
 # что можно включать и выключать в настройках: (ключ, подпись)
 SHOW_BIG = (("dps", "Урон в секунду"), ("dps_in", "Входящий урон в секунду"), ("hps", "Ремонт в секунду"),
@@ -641,18 +642,35 @@ class Hotkeys(threading.Thread):
         return out
 
 
+def single_instance(name: str):
+    """Второй экземпляр не нужен. Windows — именованный мьютекс, Linux — блокировка файла. None — уже запущен."""
+    if WIN:
+        import ctypes
+        handle = ctypes.windll.kernel32.CreateMutexW(None, False, name)
+        return None if ctypes.windll.kernel32.GetLastError() == 183 else handle
+    import fcntl
+    f = open(os.path.join(DATA_DIR, f".{name}.lock"), "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
 def run_window(port: int, demo: bool) -> int:
     import ctypes
     import tkinter as tk
 
-    user32 = ctypes.windll.user32
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "EveLogHudOverlay" + ("Demo" if demo else ""))
-    if ctypes.windll.kernel32.GetLastError() == 183:         # второй экземпляр не нужен
+    mutex = single_instance("EveLogHudOverlay" + ("Demo" if demo else ""))
+    if mutex is None:
         return 0
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
+    user32 = ctypes.windll.user32 if WIN else None
+    if WIN:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
 
     cfg = load_settings()
     show = cfg["show"]
@@ -671,7 +689,7 @@ def run_window(port: int, demo: bool) -> int:
         load_session(manual)                                 # продолжить сессию, начатую до перезапуска
     rates = Rates()
     poller = Poller(port, demo)
-    hot = Hotkeys() if cfg["hotkeys"] else None
+    hot = Hotkeys() if cfg["hotkeys"] and WIN else None          # глобальные клавиши — только в Windows
     seen = {"seq": -1, "ticks": 0, "hidden": False, "threats": {}}
     threats = Threats()
 
@@ -894,6 +912,8 @@ def run_window(port: int, demo: bool) -> int:
         cb.var = hk
         cb.pack(fill="x")
         text = "Ctrl+Alt+H — скрыть или показать окно.   Ctrl+Alt+S — старт или стоп ручной сессии."
+        if not WIN:
+            text = "В Linux глобальные клавиши не поддерживаются — используйте кнопки на окне."
         if hot and hot.failed:
             text += "\nНе удалось занять: " + ", ".join(hot.failed) + " (клавиша используется другой программой)."
         hint(text)
@@ -1180,6 +1200,8 @@ def run_window(port: int, demo: bool) -> int:
 
     # окна не забирают фокус у игры и не показываются в панели задач
     def no_activate(win):
+        if user32 is None:                                     # Linux: окно без рамки и так не забирает фокус
+            return
         try:
             hwnd = user32.GetParent(win.winfo_id()) or win.winfo_id()
             get, put = user32.GetWindowLongPtrW, user32.SetWindowLongPtrW
@@ -1214,8 +1236,8 @@ def main() -> int:
     ap.add_argument("--demo", action="store_true", help="показать пример с выдуманными числами, без трекера")
     ap.add_argument("--port", type=int, default=0, help="порт трекера (по умолчанию — web_port из config.json)")
     a = ap.parse_args()
-    if sys.platform != "win32":
-        print("Оверлей работает только в Windows.")
+    if sys.platform not in ("win32", "linux"):
+        print("Оверлей работает в Windows и Linux.")
         return 1
     return run_window(a.port or read_port(), a.demo)
 
