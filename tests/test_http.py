@@ -2,6 +2,7 @@
 """HTTP: все эндпоинты, 403 на чужой Host и чужой Origin, 404, 405, CSV с BOM."""
 import http.client
 import json
+import os
 import threading
 import time
 import unittest
@@ -146,6 +147,7 @@ class TestHttp(unittest.TestCase):
         self.assertEqual(real.get("hobgoblin ii"), [0.0, 1.0, 0.0, 0.0])
         self.assertGreater(len(real), 1000)
 
+    @unittest.skipUnless(os.name == "nt", "защищённые папки (EFS, WinError 17) бывают только в Windows")
     def test_replace_file_survives_protected_folders(self):
         import os
         import tempfile

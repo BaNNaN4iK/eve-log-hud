@@ -77,7 +77,10 @@ class TestLocalFleet(unittest.TestCase):
         self.assertEqual((form["grant_type"], form["code"], form["client_id"]), ("authorization_code", "code1", "client123"))
         self.assertNotIn("client_secret", form)                                  # PKCE: секрета нет вообще
         raw = open(os.path.join(self.td.data, "esi_token.json"), encoding="utf-8").read()
-        self.assertNotIn("refresh-", raw)                                        # токен в файле зашифрован (Windows DPAPI)
+        if os.name == "nt":
+            self.assertNotIn("refresh-", raw)                                    # токен в файле зашифрован (Windows DPAPI)
+        else:
+            self.assertEqual(os.stat(os.path.join(self.td.data, "esi_token.json")).st_mode & 0o777, 0o600)   # Linux: только владелец
         again = ef.LocalFleet(self.td.data, "client123", request=self.eve)        # перезапуск — вход сохранился
         self.assertTrue(again.auth.logged_in)
         self.assertEqual(again.auth.token(), jwt())

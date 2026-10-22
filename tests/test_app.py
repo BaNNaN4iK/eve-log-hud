@@ -16,12 +16,16 @@ class TestApp(unittest.TestCase):
         with mock.patch.dict(os.environ, {"EVE_DATA_DIR": ""}):
             self.assertEqual(app.data_dir(), app.HERE)                       # из исходников — рядом со скриптами
             with tempfile.TemporaryDirectory() as d, mock.patch.object(app, "FROZEN", True), mock.patch.object(app, "HERE", d):
-                with mock.patch.dict(os.environ, {"LOCALAPPDATA": os.path.join(d, "local")}):
+                with mock.patch.dict(os.environ, {"LOCALAPPDATA": os.path.join(d, "local"), "XDG_DATA_HOME": os.path.join(d, "local")}):
                     self.assertEqual(app.data_dir(), os.path.join(d, "local", "EveLogHUD"))   # собранное — в профиле
+                    with mock.patch.object(app.sys, "platform", "linux"), \
+                            mock.patch.dict(os.environ, {"XDG_DATA_HOME": ""}), \
+                            mock.patch.object(app.os.path, "expanduser", lambda p: p.replace("~", os.path.join(d, "home"))):
+                        self.assertEqual(app.data_dir(), os.path.join(d, "home", ".local", "share", "EveLogHUD"))   # Linux без XDG
                     os.mkdir(os.path.join(d, "data"))
                     self.assertEqual(app.data_dir(), os.path.join(d, "data"))                 # переносной режим
-        with mock.patch.dict(os.environ, {"EVE_DATA_DIR": "X:\somewhere"}):
-            self.assertEqual(app.data_dir(), "X:\somewhere")
+        with mock.patch.dict(os.environ, {"EVE_DATA_DIR": os.path.abspath("somewhere")}):
+            self.assertEqual(app.data_dir(), os.path.abspath("somewhere"))
 
     def test_port_and_roles(self):
         with tempfile.TemporaryDirectory() as d:
