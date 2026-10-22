@@ -41,6 +41,22 @@ jobs:
           python -m pip install pyinstaller pywebview pystray pillow
           python build_app.py
           ls -la dist
+      - name: Проверка собранной программы (трекер, модули, оверлей на виртуальном экране)
+        run: |
+          sudo apt-get install -y xvfb
+          export EVE_DATA_DIR="$RUNNER_TEMP/data" && mkdir -p "$EVE_DATA_DIR/logs"
+          echo '{"logs_dir": "'"$EVE_DATA_DIR"'/logs", "online_enabled": false, "update_check": false}' > "$EVE_DATA_DIR/config.json"
+          ./dist/EveLogHUD/EveLogHUD --tracker > "$RUNNER_TEMP/tracker.txt" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:47322/api/live > /dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:47322/api/live | head -c 300; echo
+          curl -sf http://127.0.0.1:47322/api/modules | python -c "import json,sys; m=json.load(sys.stdin)['modules']; print([(x['id'], x['loaded'], x['error']) for x in m]); assert not [x for x in m if x['error']]"
+          curl -sf http://127.0.0.1:47322/api/settings/logs | head -c 300; echo
+          set +e
+          timeout 8 xvfb-run -a ./dist/EveLogHUD/EveLogHUD --overlay --demo; code=$?
+          set -e
+          echo "overlay exit: $code"; test "$code" = "124"
+          touch "$EVE_DATA_DIR/stop.flag"; sleep 6
+          cat "$RUNNER_TEMP/tracker.txt" | tail -20
       - name: Приложить к выпуску
         env:
           GH_TOKEN: ${{ github.token }}
