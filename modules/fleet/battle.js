@@ -25,7 +25,11 @@
       '.bt-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}\n' +
       '.bt-tag{font-size:11px;color:var(--muted)} .bt-fleet{color:var(--good);font-size:11px;margin-left:4px}\n' +
       '.bt-ico{width:20px;height:20px;vertical-align:middle;margin-right:5px;border-radius:3px}\n' +
-      '.bt-hi{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}.bt-hi div{background:var(--panel2);border-radius:8px;padding:8px 10px}\n' +
+      '.bt-hi{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}.bt-hi>div{background:var(--panel2);border-radius:8px;padding:8px 10px;border-left:4px solid var(--c,transparent)}\n' +
+      'tr.bt-rA>td:first-child{box-shadow:inset 4px 0 0 #2f8fde}tr.bt-rB>td:first-child{box-shadow:inset 4px 0 0 #d4483b}tr.bt-rnpc>td:first-child{box-shadow:inset 4px 0 0 #7b8a8b}\n' +
+      'details.bt-sec{margin-top:14px;border-top:1px solid var(--line);padding-top:8px}details.bt-sec>summary{cursor:pointer;list-style:none;font-size:13px;color:var(--muted);font-weight:600;padding:2px 0 6px;user-select:none}\n' +
+      'details.bt-sec>summary::-webkit-details-marker{display:none}details.bt-sec>summary::before{content:"\\25B8";display:inline-block;width:1.1em;transition:transform .15s}\n' +
+      'details.bt-sec[open]>summary::before{transform:rotate(90deg)}details.bt-sec>summary:hover{color:var(--text)}details.bt-sec>summary .n{font-weight:400}\n' +
       '.bt-hi .k{font-size:11.5px;color:var(--muted)} .bt-chart{position:relative} .bt-chart svg{width:100%;height:auto;max-height:260px;display:block;cursor:crosshair}\n' +
       '.bt-tip{position:absolute;z-index:5;max-width:360px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 6px 24px rgba(0,0,0,.35);pointer-events:none}\n' +
       '.bt-tip-h{color:var(--muted);font-size:11.5px;margin-bottom:4px}.bt-tip-row{padding:3px 0}.bt-tip-f{margin-top:5px;padding-top:5px;border-top:1px solid var(--line);font-size:11.5px}\n' +
@@ -44,6 +48,14 @@
     render: function () { init(); } });
 
   var B = { inited: false, rep: null, job: null, side: '', listAt: 0 };
+  var CLOSED = {};
+  try { CLOSED = JSON.parse(localStorage.getItem('elw.battle.closed') || '{}') || {}; } catch (e) { CLOSED = {}; }
+  function sec(key, title, body) {
+    if (!body) return '';
+    return '<details class="bt-sec" data-sec="' + key + '"' + (CLOSED[key] ? '' : ' open') + '><summary>' + title + '</summary>' + body + '</details>';
+  }
+  function rowSide(s) { return function () { return ' class="bt-r' + s + '"'; }; }
+  function rowBy(field) { return function (r) { return ' class="bt-r' + (r[field] || 'npc') + '"'; }; }
 
   function init() {
     if (!B.inited) {
@@ -62,7 +74,8 @@
       }, function () { });
       loadSaved();
     }
-    draw();
+    var sortKey = JSON.stringify((ELW.S && ELW.S.sort) || {});            // ядро зовёт render() каждые 4 с и при сортировке
+    if (B.drawn !== B.rep || B.sortKey !== sortKey) { B.sortKey = sortKey; draw(); }
   }
   function loadSaved(select) {
     api('/api/battles').then(function (j) {
@@ -171,7 +184,8 @@
       ticks += '<text x="' + cx(d, tt).toFixed(1) + '" y="' + (CH.H - 6) + '" font-size="11" text-anchor="' + (k === 0 ? 'start' : k === 4 ? 'end' : 'middle') +
         '" fill="currentColor" fill-opacity=".6">' + esc(eve(Math.round(tt)).slice(0, 5)) + '</text>';
     }
-    return '<div class="bt-chart"><h3 class="small muted" style="margin:14px 0 4px">Потери в ISK нарастающим итогом (время EVE, ' + mins + ' мин) — наведите на график</h3>' +
+    B.chartTitle = 'Потери в ISK нарастающим итогом <span class="n">(время EVE, ' + mins + ' мин) — наведите на график</span>';
+    return '<div class="bt-chart">' +
       '<svg class="bt-svg" viewBox="0 0 ' + CH.W + ' ' + CH.H + '" role="img" aria-label="График потерь ISK: точка — потеря корабля">' +
       '<line x1="' + CH.P + '" y1="' + cy(d, 0) + '" x2="' + (CH.W - CH.R) + '" y2="' + cy(d, 0) + '" stroke="currentColor" stroke-opacity=".25"/>' +
       '<line x1="' + CH.P + '" y1="' + cy(d, d.max) + '" x2="' + (CH.W - CH.R) + '" y2="' + cy(d, d.max) + '" stroke="currentColor" stroke-opacity=".08"/>' +
@@ -234,13 +248,13 @@
     var out = [];
     var km = function (id, label) {
       var t = tl[id]; if (!t) return;
-      out.push('<div><div class="k">' + label + '</div>' + sideDot(t.side) + ico(t.ship) + esc(nm(t.ship)) + ' — ' + esc(nm(t.victim)) +
+      out.push('<div style="--c:' + (COL[t.side] || COL.npc) + '"><div class="k">' + label + '</div>' + sideDot(t.side) + ico(t.ship) + esc(nm(t.ship)) + ' — ' + esc(nm(t.victim)) +
         '<div class="small">' + esc(isk(t.value)) + ' ISK · ' + esc(eve(t.t)) + ' ' + zk(t.id) + '</div></div>');
     };
     var pl = function (key, label, fmt) {
       var h = hi[key]; if (!h) return;
       var p = P[h.id] || {};
-      out.push('<div><div class="k">' + label + '</div>' + sideDot(p.side) + esc(nm(h.id)) + '<div class="small">' + esc(fmt(h.value)) + '</div></div>');
+      out.push('<div style="--c:' + (COL[p.side] || COL.npc) + '"><div class="k">' + label + '</div>' + sideDot(p.side) + esc(nm(h.id)) + '<div class="small">' + esc(fmt(h.value)) + '</div></div>');
     };
     km(hi.most_expensive, 'Самый дорогой килл');
     km(hi.first_blood, 'Первая кровь');
@@ -248,21 +262,24 @@
     pl('top_final_blows', 'Больше всех добиваний', function (v) { return v + ' добиваний'; });
     pl('top_kills', 'Больше всех участий в киллах', function (v) { return v + ' киллов'; });
     pl('top_lost', 'Самые большие потери', function (v) { return isk(v) + ' ISK'; });
-    return out.length ? '<h3 class="small muted" style="margin:14px 0 6px">Отличились</h3><div class="bt-hi">' + out.join('') + '</div>' : '';
+    return out.length ? sec('hi', 'Отличились', '<div class="bt-hi">' + out.join('') + '</div>') : '';
   }
 
   function draw() {
     var box = $('btReport'), R = B.rep;
+    B.drawn = R;
     if (!R) { box.innerHTML = ''; return; }
     var r = R.report;
     var h = '<section class="panel"><h2>' + esc(R.title || R.system_names.join(', ')) + ' <span class="muted small">' + esc(eve(r.t0, true)) + ' — ' + esc(eve(r.t1)) +
       ' (EVE) · ' + esc(L.fmtDur(r.duration)) + ' · киллмейлов ' + r.kms + ' · ' + esc(R.system_names.join(', ')) + '</span></h2>' +
       '<div class="controls" style="margin:-4px 0 10px">' + R.zkill_related.map(function (u, i) { return '<a class="small" href="' + esc(u) + '" target="_blank" rel="noopener">zKillboard: ' + esc(R.system_names[i] || '') + ' ↗</a>'; }).join(' ') +
       '<button type="button" class="btn" id="btCopy">Скопировать итог</button><span class="small muted" id="btCopyMsg" role="status"></span></div>' +
-      '<div class="bt-sides">' + sideCard('A', R) + sideCard('B', R) + '</div>' + chart(R) + highlights(R);
+      '<div class="bt-sides">' + sideCard('A', R) + sideCard('B', R) + '</div>';
+    var ch = chart(R);
+    h += sec('chart', B.chartTitle || 'Потери в ISK', ch) + highlights(R);
 
     // группы (альянсы и корпорации) с переносом на другую сторону
-    h += '<h3 class="small muted" style="margin:16px 0 6px">Альянсы и корпорации <span class="muted">— если кто-то оказался не на той стороне, перенесите</span></h3>' +
+    h += sec('ent', 'Альянсы и корпорации <span class="n">(' + r.entities.length + ') — если кто-то оказался не на той стороне, перенесите</span>',
       table('btEnt', r.entities.map(function (e) { return Object.assign({ name: ent(e.key) }, e); }), [
         { k: 'side', t: 'Сторона', l: 1, f: function (e) { return sideDot(e.side) + (e.side === 'A' ? 'наша' : 'противник') + (R.overrides[e.key] ? ' <span class="bt-tag">(вручную)</span>' : ''); } },
         { k: 'name', t: 'Группа', l: 1, f: function (e) { return esc(e.name); } },
@@ -270,22 +287,23 @@
         { k: 'isk_lost', t: 'Потеряно ISK', f: function (e) { return esc(isk(e.isk_lost)); } },
         { k: 'damage', t: 'Урон', f: function (e) { return esc(L.fmtInt(e.damage)); } },
         { k: '', t: '', f: function (e) { return '<button type="button" class="btn" data-move="' + esc(e.key) + '" data-to="' + (e.side === 'A' ? 'B' : 'A') + '">' + (e.side === 'A' ? 'К противнику' : 'К нашим') + '</button>'; } }
-      ], { sort: { k: 'pilots', d: -1 } });
+      ], { sort: { k: 'pilots', d: -1 }, rowAttrs: rowBy('side') }));
 
     // корабли сторон
     ['A', 'B'].forEach(function (s) {
-      h += '<h3 class="small muted" style="margin:16px 0 6px">' + sideDot(s) + 'Корабли — ' + (s === 'A' ? 'наша сторона' : 'противник') + '</h3>' +
+      h += sec('ships' + s, sideDot(s) + 'Корабли — ' + (s === 'A' ? 'наша сторона' : 'противник') + ' <span class="n">(' + r.sides[s].ships.length + ')</span>',
         table('btShips' + s, r.sides[s].ships.map(function (x) { return Object.assign({ name: nm(x.type), cls: cls(x.type) }, x); }), [
           { k: 'name', t: 'Корабль', l: 1, f: function (x) { return ico(x.type) + esc(x.name) + (x.cls ? ' <span class="bt-tag">' + esc(x.cls) + '</span>' : ''); } },
           { k: 'fielded', t: 'Было', title: 'Сколько пилотов были на этом корабле (видно по киллмейлам)' }, { k: 'lost', t: 'Потеряно' },
           { k: 'isk_lost', t: 'Потеряно ISK', f: function (x) { return esc(isk(x.isk_lost)); } },
           { k: 'damage', t: 'Урон', f: function (x) { return esc(L.fmtInt(x.damage)); } }
-        ], { sort: { k: 'fielded', d: -1 }, empty: 'Нет данных' });
+        ], { sort: { k: 'fielded', d: -1 }, empty: 'Нет данных', rowAttrs: rowSide(s) }));
     });
 
     // пилоты
     var pilots = r.pilots.filter(function (p) { return !B.side || p.side === B.side; });
-    h += '<h3 class="small muted" style="margin:16px 0 6px">Пилоты</h3><div class="controls bt-filter" style="margin-bottom:6px">' +
+    var missing = r.fleet_missing && r.fleet_missing.length ? '<p class="small muted">Были во флоте, но не попали ни на один киллмейл (' + r.fleet_missing.length + '): ' + esc(r.fleet_missing.map(nm).join(', ')) + '</p>' : '';
+    h += sec('pilots', 'Пилоты <span class="n">(' + r.pilots.length + ')</span>', '<div class="controls bt-filter" style="margin-bottom:6px">' +
       ['', 'A', 'B'].map(function (s) { return '<button type="button" class="btn' + (B.side === s ? ' on' : '') + '" data-side="' + s + '">' + (s === '' ? 'Все' : s === 'A' ? 'Наши' : 'Противник') + '</button>'; }).join('') + '</div>' +
       table('btPilots', pilots.map(function (p) { return Object.assign({ name: nm(p.id), group: ent(p.entity), lost: p.isk_lost }, p); }), [
         { k: 'name', t: 'Пилот', l: 1, f: function (p) { return sideDot(p.side) + esc(p.name) + (p.in_fleet ? '<span class="bt-fleet" title="Был в нашем флоте">флот</span>' : '') + '<div class="bt-tag">' + esc(p.group) + '</div>'; } },
@@ -295,23 +313,20 @@
         { k: 'final_blows', t: 'Добил' }, { k: 'top_damage', t: 'Топ-урон', title: 'Сколько раз нанёс больше всех урона по цели' },
         { k: 'isk_involved', t: 'ISK в киллах', f: function (p) { return esc(isk(p.isk_involved)); } },
         { k: 'lost', t: 'Потерял', f: function (p) { return p.losses.length ? p.losses.map(function (l) { return ico(l.ship) + esc(isk(l.value)) + ' ' + zk(l.km); }).join('<br>') : '<span class="muted">—</span>'; } }
-      ], { sort: { k: 'damage', d: -1 }, limit: 300 });
-    if (r.fleet_missing && r.fleet_missing.length) {
-      h += '<p class="small muted">Были во флоте, но не попали ни на один киллмейл (' + r.fleet_missing.length + '): ' + esc(r.fleet_missing.map(nm).join(', ')) + '</p>';
-    }
+      ], { sort: { k: 'damage', d: -1 }, limit: 300, rowAttrs: rowBy('side') }) + missing);
 
     // оружие
     ['A', 'B'].forEach(function (s) {
       if (!r.sides[s].weapons.length) return;
-      h += '<h3 class="small muted" style="margin:16px 0 6px">' + sideDot(s) + 'Чем стреляли — ' + (s === 'A' ? 'наша сторона' : 'противник') + '</h3>' +
+      h += sec('weap' + s, sideDot(s) + 'Чем стреляли — ' + (s === 'A' ? 'наша сторона' : 'противник'),
         table('btW' + s, r.sides[s].weapons.map(function (w) { return Object.assign({ name: nm(w.type) }, w); }), [
           { k: 'name', t: 'Оружие / дроны / модуль', l: 1, f: function (w) { return ico(w.type) + esc(w.name); } },
           { k: 'uses', t: 'На киллмейлах' }, { k: 'damage', t: 'Урон', f: function (w) { return esc(L.fmtInt(w.damage)); } }
-        ], { sort: { k: 'damage', d: -1 }, limit: 15 });
+        ], { sort: { k: 'damage', d: -1 }, limit: 15, rowAttrs: rowSide(s) }));
     });
 
     // хронология
-    h += '<h3 class="small muted" style="margin:16px 0 6px">Хронология (время EVE)</h3>' +
+    h += sec('tl', 'Хронология <span class="n">(время EVE, ' + r.timeline.length + ')</span>',
       table('btTl', r.timeline.map(function (t) { return Object.assign({ vname: nm(t.victim) }, t); }), [
         { k: 't', t: 'Время', f: function (t) { return esc(eve(t.t)); } },
         { k: 'vname', t: 'Жертва', l: 1, f: function (t) { return sideDot(t.side) + ico(t.ship) + esc(nm(t.ship)) + ' — ' + esc(t.vname) + '<div class="bt-tag">' + esc(ent(t.victim_entity)) + (t.npc ? ' · убили NPC' : '') + (t.solo ? ' · соло' : '') + (t.awox ? ' · свои' : '') + '</div>'; } },
@@ -320,10 +335,20 @@
         { k: '', t: 'Добил', l: 1, f: function (t) { return t.final_blow ? esc(t.final_blow.c ? nm(t.final_blow.c) : ent(t.final_blow.e)) + '<div class="bt-tag">' + esc(nm(t.final_blow.s)) + '</div>' : '—'; } },
         { k: '', t: 'Больше всех урона', l: 1, f: function (t) { return t.top ? esc(t.top.c ? nm(t.top.c) : ent(t.top.e)) + '<div class="bt-tag">' + esc(nm(t.top.s)) + ' · ' + esc(L.fmtInt(t.top.d)) + '</div>' : '—'; } },
         { k: '', t: '', f: function (t) { return zk(t.id); } }
-      ], { sort: { k: 't', d: 1 }, limit: 500 });
-    box.innerHTML = h + '</section>';
+      ], { sort: { k: 't', d: 1 }, limit: 500, rowAttrs: rowBy('side') }));
+    box.innerHTML = h + '<div class="controls" style="margin-top:12px"><button type="button" class="btn" id="btFoldAll">Свернуть всё</button>' +
+      '<button type="button" class="btn" id="btOpenAll">Развернуть всё</button></div></section>';
   }
 
+  function remember(d, open) {
+    var key = d.getAttribute('data-sec');
+    if (open) delete CLOSED[key]; else CLOSED[key] = 1;
+    try { localStorage.setItem('elw.battle.closed', JSON.stringify(CLOSED)); } catch (err) { }
+  }
+  $('btReport').addEventListener('click', function (e) {
+    var sm = e.target.closest && e.target.closest('details.bt-sec > summary');
+    if (sm) remember(sm.parentNode, !sm.parentNode.open);          // состояние после нажатия
+  }, true);
   $('btReport').addEventListener('mousemove', chartHover);
   $('btReport').addEventListener('mouseleave', function (e) { chartLeave({ target: $('btReport').querySelector('svg.bt-svg') || e.target }); });
   $('btReport').addEventListener('mouseout', function (e) { if (e.target.closest && e.target.closest('svg.bt-svg') && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('svg.bt-svg'))) chartLeave(e); });
@@ -335,6 +360,11 @@
       mv.disabled = true;
       api('/api/battle/move', { method: 'POST', headers: POST, body: JSON.stringify({ id: R.id, entity: mv.getAttribute('data-move'), side: mv.getAttribute('data-to') }) })
         .then(function (j) { if (j.ok) { B.rep = j; draw(); } else mv.disabled = false; });
+      return;
+    }
+    if (e.target.id === 'btFoldAll' || e.target.id === 'btOpenAll') {
+      var open = e.target.id === 'btOpenAll';
+      [].forEach.call($('btReport').querySelectorAll('details.bt-sec'), function (d) { d.open = open; remember(d, open); });
       return;
     }
     var sb = e.target.closest && e.target.closest('button[data-side]');
