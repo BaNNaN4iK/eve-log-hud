@@ -33,6 +33,13 @@ MARKETS = {
     "rens": ("Rens", 10000030, 60004588),
     "hek": ("Hek", 10000042, 60005686),
 }
+HUB_SYSTEMS = {"jita": 30000142, "amarr": 30002187, "dodixie": 30002659, "rens": 30002510, "hek": 30002053}
+HUB_TTL = 3600                         # цены всего хаба (сканер) — не чаще раза в час
+HISTORY_TTL = 12 * 3600
+SUSPICIOUS = 4.0
+LP_MARGIN = 85.0                       # маржа выше — почти всегда чертёж из LP-магазина или редкая копия (цена не в материалах)                       # цена продукта дороже средней по игре в столько раз — скорее всего «ордер-ловушка»
+CATEGORIES = {"ships": (6,), "modules": (7,), "charges": (8,), "drones": (18, 87), "components": (17,),
+              "implants": (20,), "structures": (22, 23, 65, 66), "materials": (4, 43)}
 PRICE_TTL = 300
 INDEX_TTL = 3600                       # индексы систем CCP пересчитывает раз в час
 ADJUSTED_TTL = 6 * 3600                # ориентировочные цены — раз в сутки
@@ -167,6 +174,8 @@ class Calculator:
         self.data = data or load_data()
         self.books: Dict[Tuple[str, int], Tuple[float, dict]] = {}
         self.adjusted: Tuple[float, Dict[int, float]] = (0, {})
+        self.average: Dict[int, float] = {}
+        self.average_loaded = False            # старый кэш без средних цен — перекачать один раз
         self.indices: Tuple[float, Dict[int, dict]] = (0, {})
         self.systems: Dict[str, Optional[int]] = {}
         self.lock = threading.Lock()
@@ -185,6 +194,8 @@ class Calculator:
             with open(self.cache_path, encoding="utf-8") as f:
                 c = json.load(f)
             self.adjusted = (float(c["adjusted"][0]), {int(k): float(v) for k, v in c["adjusted"][1].items()})
+            self.average = {int(k): float(v) for k, v in (c.get("average") or {}).items()}
+            self.average_loaded = "average" in c
             self.indices = (float(c["indices"][0]), {int(k): v for k, v in c["indices"][1].items()})
         except (OSError, ValueError, KeyError, TypeError):
             pass
@@ -195,7 +206,8 @@ class Calculator:
         tmp = self.cache_path + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"adjusted": [self.adjusted[0], self.adjusted[1]], "indices": [self.indices[0], self.indices[1]]}, f)
+                json.dump({"adjusted": [self.adjusted[0], self.adjusted[1]], "average": self.average,
+                           "indices": [self.indices[0], self.indices[1]]}, f)
             try:
                 os.replace(tmp, self.cache_path)
             except OSError:
@@ -212,9 +224,11 @@ class Calculator:
             return
         try:
             changed = False
-            if now - self.adjusted[0] >= ADJUSTED_TTL or not self.adjusted[1]:
+            if now - self.adjusted[0] >= ADJUSTED_TTL or not self.adjusted[1] or not self.average_loaded:
                 rows = self.big("/markets/prices/")
                 self.adjusted = (now, {int(r["type_id"]): float(r.get("adjusted_price") or 0) for r in rows or []})
+                self.average = {int(r["type_id"]): float(r["average_price"]) for r in rows or [] if r.get("average_price")}
+                self.average_loaded = True
                 changed = True
             if now - self.indices[0] >= INDEX_TTL or not self.indices[1]:
                 rows = self.big("/industry/systems/")
@@ -304,6 +318,10 @@ class Calculator:
         return book
 
     def prices(self, ids, market: str, now: float) -> Dict[int, dict]:
+        hub = getattr(self, "hub", None)
+        if hub is not None and hub.fresh(market, now):
+            book = hub.book(market)
+            return {t: book.get(t) or {"buy": None, "sell": None, "split": None} for t in set(ids)}
         if self.esi is None:
             return {}
         out = {}
@@ -317,9 +335,7 @@ class Calculator:
         return out
 
     def adjusted_prices(self, now: float) -> Dict[int, float]:
-        if self.esi is None and self.big is None:
-            return {}
-        self._ensure_static(now, need_index=False)
+        self._ensure_static(now, need_index=False)               # без сети — то, что уже сохранено
         return self.adjusted[1]
 
     def cost_index(self, system: str, kind: str, now: float) -> Tuple[Optional[float], str]:
@@ -345,7 +361,7 @@ class Calculator:
     def plan(self, tid: int, units: int, s: dict, build: set, depth: int = 0, top: bool = True) -> dict:
         """Дерево производства на units штук продукта (округляется до целых прогонов)."""
         bp = self.data["bp"][str(tid)]
-        _, kind, base_time, out_qty, mats, max_runs = bp
+        _, kind, base_time, out_qty, mats, max_runs = bp[:6]
         runs = max(1, math.ceil(units / out_qty))
         b = bonuses(s, kind, top)
         node = {"type_id": tid, "name": self.name(tid), "kind": kind, "runs": runs, "out": runs * out_qty,
@@ -427,6 +443,17 @@ class Calculator:
                 j["cost"] = eiv * (idx / 100 * b["cost"] + s["facility_tax"] / 100 + s["scc"] / 100)
                 total_job += j["cost"]
         product_price = price(tid, s["sell_mode"])
+        compare = {}
+        for mode in ("sell", "buy"):                              # продажа своим ордером и мгновенно — рядом
+            pp = price(tid, mode)
+            rev = pp * tree["out"] if pp is not None else None
+            fee = rev * (s["sales_tax"] + (s["broker"] if mode == "sell" else 0)) / 100 if rev is not None else None
+            pr = rev - fee - (total_mat + total_job) if rev is not None and have_prices else None
+            tt = sum(j["time"] for j in jobs)
+            compare[mode] = {"price": pp, "revenue": rev, "fees": fee, "profit": pr,
+                             "per_run": pr / tree["runs"] if pr is not None else None,
+                             "margin": round(pr * 100 / rev, 1) if pr is not None and rev else None,
+                             "isk_hour": pr / (tt / 3600) if pr is not None and tt else None}
         out_units = tree["out"]
         revenue = product_price * out_units if product_price is not None else None
         fees = revenue * (s["sales_tax"] + s["broker"] * (s["sell_mode"] == "sell")) / 100 if revenue is not None else None
@@ -445,10 +472,274 @@ class Calculator:
                        "time": total_time, "top_time": tree["time"],
                        "isk_hour": profit / (total_time / 3600) if profit is not None and total_time else None,
                        "volume": sum(r["volume"] for r in buy_rows)},
-            "unit_prices": {str(t): price(t, s["buy_mode"]) for t in ids},
+            "unit_prices": {str(t): price(t, s["buy_mode"]) for t in ids}, "compare": compare,
             "cost_index": idx_used[0], "system": idx_used[1], "missing_price": missing_price,
             "market_name": MARKETS[s["market"]][0], "warning": note_hs, "data_built": self.data.get("built"),
         }
+
+
+# ---------------------------------------------------------------------------
+# Сканер: цены всего хаба и прибыльность всех чертежей
+# ---------------------------------------------------------------------------
+
+class Hub:
+    """Лучшие цены всех предметов на станции хаба — из всех ордеров региона (сотни страниц ESI, в фоне)."""
+
+    def __init__(self, data_dir: str = "", get_page: Optional[Callable] = None, workers: int = 8):
+        self.dir = data_dir
+        self.get_page = get_page or self._esi_page
+        self.workers = workers
+        self.books: Dict[str, Tuple[float, Dict[int, dict]]] = {}
+        self.status: Dict[str, dict] = {}
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def _esi_page(region: int, page: int) -> Tuple[list, int]:
+        import urllib.request
+        import zlib
+        req = urllib.request.Request(f"{ESI_BASE}/markets/{region}/orders/?datasource=tranquility&order_type=all&page={page}",
+                                     headers={"Accept": "application/json", "Accept-Encoding": "gzip",
+                                              "User-Agent": "EveLogHUD industry (github.com/BaNNaN4iK/eve-log-hud)"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+            pages = int(r.headers.get("X-Pages") or 1)
+            if r.headers.get("Content-Encoding") == "gzip" or raw[:2] == b"\x1f\x8b":
+                raw = zlib.decompress(raw, 16 + zlib.MAX_WBITS)
+        return json.loads(raw.decode("utf-8")), pages
+
+    def _path(self, market: str) -> str:
+        return os.path.join(self.dir, f"industry_hub_{market}.json") if self.dir else ""
+
+    def book(self, market: str) -> Dict[int, dict]:
+        with self.lock:
+            hit = self.books.get(market)
+        if hit is None and self._path(market):
+            try:
+                with open(self._path(market), encoding="utf-8") as f:
+                    d = json.load(f)
+                hit = (float(d["at"]), {int(k): {"buy": v[0], "sell": v[1], "split": v[2], "bv": v[3], "sv": v[4]}
+                                        for k, v in d["prices"].items()})
+                with self.lock:
+                    self.books[market] = hit
+            except (OSError, ValueError, KeyError, TypeError):
+                return {}
+        return hit[1] if hit else {}
+
+    def age(self, market: str) -> Optional[float]:
+        self.book(market)
+        with self.lock:
+            hit = self.books.get(market)
+        return hit[0] if hit else None
+
+    def fresh(self, market: str, now: float) -> bool:
+        at = self.age(market)
+        return at is not None and now - at < HUB_TTL
+
+    def state(self, market: str) -> dict:
+        with self.lock:
+            st = dict(self.status.get(market) or {})
+        st["at"] = self.age(market)
+        return st
+
+    def refresh(self, market: str, now: Optional[float] = None) -> None:
+        """Скачать все ордера региона и оставить лучшие цены на станции хаба. Идёт в фоне, с прогрессом."""
+        now = time.time() if now is None else now
+        _, region, station = MARKETS[market]
+        with self.lock:
+            if (self.status.get(market) or {}).get("running"):
+                return
+            self.status[market] = {"running": True, "done": 0, "pages": 0, "error": ""}
+        try:
+            first, pages = self.get_page(region, 1)
+            with self.lock:
+                self.status[market].update(pages=pages, done=1)
+            acc: Dict[int, list] = {}
+
+            def take(orders):
+                for o in orders or []:
+                    if o.get("location_id") != station:
+                        continue
+                    a = acc.setdefault(int(o["type_id"]), [None, None, 0, 0])
+                    if o.get("is_buy_order"):
+                        a[0] = o["price"] if a[0] is None else max(a[0], o["price"])
+                        a[2] += int(o.get("volume_remain") or 0)
+                    else:
+                        a[1] = o["price"] if a[1] is None else min(a[1], o["price"])
+                        a[3] += int(o.get("volume_remain") or 0)
+            take(first)
+
+            def one(pg):
+                for attempt in range(3):
+                    try:
+                        return self.get_page(region, pg)[0]
+                    except Exception:
+                        if attempt == 2:
+                            raise
+                        time.sleep(2 + attempt * 3)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as pool:
+                for orders in pool.map(one, range(2, pages + 1)):
+                    take(orders)
+                    with self.lock:
+                        self.status[market]["done"] += 1
+            prices = {}
+            for t, (b, sl, bv, sv) in acc.items():
+                split = (b + sl) / 2 if b is not None and sl is not None else (b if sl is None else sl)
+                prices[t] = {"buy": b, "sell": sl, "split": split, "bv": bv, "sv": sv}
+            with self.lock:
+                self.books[market] = (now, prices)
+            if self._path(market):
+                tmp = self._path(market) + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump({"at": now, "prices": {str(t): [v["buy"], v["sell"], v["split"], v["bv"], v["sv"]] for t, v in prices.items()}},
+                              f, separators=(",", ":"))
+                try:
+                    os.replace(tmp, self._path(market))
+                except OSError:
+                    import shutil
+                    shutil.copyfile(tmp, self._path(market))
+                    os.remove(tmp)
+            with self.lock:
+                self.status[market].update(running=False, error="")
+        except Exception as e:
+            with self.lock:
+                self.status[market].update(running=False, error=f"Цены не загружены: {e}")
+
+
+def category_of(data: dict, tid: int) -> str:
+    t = data["types"].get(str(tid))
+    cat = t[2] if t else None
+    for key, cats in CATEGORIES.items():
+        if cat in cats:
+            return key
+    return "other"
+
+
+def scan(calc: "Calculator", market: str, s: dict, now: float, reactions: bool = True) -> List[dict]:
+    """Прибыль за один прогон каждого чертежа по ценам хаба. Без цены продукта или материала — пропуск."""
+    book = calc.hub.book(market) if getattr(calc, "hub", None) else {}
+    if not book:
+        return []
+    data = calc.data
+    adj = calc.adjusted_prices(now)
+    calc._ensure_static(now, need_index=True)
+    idx_all = calc.indices[1].get(HUB_SYSTEMS.get(market, 0), {})
+    out = []
+    for key, bp in data["bp"].items():
+        _, kind, base_time, out_qty, mats, _ = bp[:6]
+        src = bp[6] if len(bp) > 6 else "bpo"
+        if kind == "r" and not reactions:
+            continue
+        tid = int(key)
+        pp = book.get(tid)
+        if not pp or (pp["sell"] is None and pp["buy"] is None):
+            continue
+        b = bonuses(dict(s, me=2, te=4) if src == "inv" else s, kind, True)    # копия после изобретения — обычно ME 2 / TE 4
+        cost = 0.0
+        missing = False
+        for m, q in mats:
+            mp = (book.get(m) or {}).get(s["buy_mode"])
+            if mp is None:
+                missing = True
+                break
+            cost += mp * mat_qty(q, 1, b["mat"])
+        if missing:
+            continue
+        idx = s["cost_index"] / 100 if s["cost_index"] is not None else idx_all.get("reaction" if kind == "r" else "manufacturing")
+        eiv = sum(q * adj.get(m, 0) for m, q in mats)
+        job = eiv * ((idx or 0) * b["cost"] + s["facility_tax"] / 100 + s["scc"] / 100)
+        total = cost + job
+        t_run = base_time * b["time"]
+        row = {"id": tid, "name": data["types"][key][0], "kind": kind, "cat": category_of(data, tid), "time": t_run, "out": out_qty,
+               "cost": total, "job": job, "src": src}
+        avg = calc.average.get(tid)
+        row["avg"] = avg
+        for mode, tax in (("sell", s["sales_tax"] + s["broker"]), ("buy", s["sales_tax"])):
+            price = pp[mode]
+            if price is None:
+                row[mode] = None
+                continue
+            rev = price * out_qty
+            profit = rev * (1 - tax / 100) - total
+            row[mode] = {"price": price, "profit": profit, "margin": profit * 100 / rev if rev else None,
+                         "isk_hour": profit / (t_run / 3600) if t_run else None,
+                         "odd": bool(avg and price > avg * SUSPICIOUS)}
+        if src == "bpo" and any(row[m] and (row[m]["margin"] or 0) > LP_MARGIN for m in ("sell", "buy")):
+            row["src"] = "lp"                                     # навигационные модули Navy, спецвыпуски и т. п.
+        row["sure"] = bool(row["sell"] and row["buy"] and row["sell"]["profit"] > 0 and row["buy"]["profit"] > 0
+                           and not row["sell"]["odd"] and not row["buy"]["odd"])
+        row["supply"] = pp.get("sv", 0)
+        out.append(row)
+    return out
+
+
+class History:
+    """Сколько продаётся за неделю и вчера (история рынка региона по предмету) — только для видимых карточек."""
+
+    def __init__(self, esi: Optional[Callable], data_dir: str = ""):
+        self.esi = esi
+        self.path = os.path.join(data_dir, "industry_history.json") if data_dir else ""
+        self.d: Dict[str, list] = {}
+        self.lock = threading.Lock()
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                self.d = json.load(f)
+        except (OSError, ValueError):
+            self.d = {}
+
+    def week(self, market: str, tid: int) -> Optional[int]:
+        v = self.d.get(f"{MARKETS[market][1]}:{tid}")
+        return v[1] if v else None
+
+    def fill(self, market: str, ids: List[int]) -> None:
+        """Проверить спрос у всех кандидатов сканера (в фоне, порциями)."""
+        with self.lock:
+            if getattr(self, "running", False):
+                return
+            self.running = True
+            self.todo = len(ids)
+            self.done = 0
+        try:
+            for i in range(0, len(ids), 60):
+                self.get(market, ids[i:i + 60])
+                with self.lock:
+                    self.done = min(self.todo, i + 60)
+        finally:
+            with self.lock:
+                self.running = False
+
+    def get(self, market: str, ids: List[int], now: Optional[float] = None) -> Dict[str, dict]:
+        now = time.time() if now is None else now
+        region = MARKETS[market][1]
+        need = [t for t in ids if now - (self.d.get(f"{region}:{t}") or [0])[0] >= HISTORY_TTL]
+        if need and self.esi is not None:
+            def one(t):
+                try:
+                    rows, _ = self.esi(f"/markets/{region}/history/", type_id=t)
+                    rows = sorted(rows or [], key=lambda r: r.get("date", ""))
+                    since = time.strftime("%Y-%m-%d", time.gmtime(now - 7 * 86400))
+                    week = sum(int(r.get("volume") or 0) for r in rows if r.get("date", "") > since)
+                    return t, [now, week, int(rows[-1].get("volume") or 0) if rows else 0, rows[-1].get("date", "") if rows else ""]
+                except Exception:
+                    return t, None
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                for t, v in pool.map(one, need[:60]):
+                    if v is not None:
+                        with self.lock:
+                            self.d[f"{region}:{t}"] = v
+            if self.path:
+                try:
+                    with self.lock:
+                        snap = dict(self.d)
+                    with open(self.path, "w", encoding="utf-8") as f:
+                        json.dump(snap, f, separators=(",", ":"))
+                except OSError:
+                    pass
+        out = {}
+        for t in ids:
+            v = self.d.get(f"{region}:{t}")
+            if v:
+                out[str(t)] = {"week": v[1], "last": v[2], "date": v[3]}
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +784,106 @@ def setup(ctx) -> None:
             res["note"] = "Цены и стоимость работ не показаны: онлайн-функции выключены (online_enabled в config.json)."
         return res
 
+    hub = Hub(ctx.data_dir)
+    calc.hub = hub
+    hist = History(calc.esi, ctx.data_dir)
+    SORTS = {"isk_hour": lambda r, m: (r[m] or {}).get("isk_hour") or -1e30,
+             "profit": lambda r, m: (r[m] or {}).get("profit") or -1e30,
+             "margin": lambda r, m: (r[m] or {}).get("margin") or -1e30,
+             "volume": lambda r, m: r.get("supply") or 0}
+    cache = {"key": None, "rows": []}
+
+    def scanner(qs):
+        g = lambda k, d="": (qs.get(k) or [d])[0]
+        market = g("market", "jita") if g("market", "jita") in MARKETS else "jita"
+        s = load_settings()["settings"]
+        now = time.time()
+        st = hub.state(market)
+        key = (market, st.get("at"), json.dumps(s, sort_keys=True), calc.indices[0], calc.adjusted[0], len(calc.average))
+        if cache["key"] != key:
+            cache["rows"], cache["key"] = scan(calc, market, s, now), key
+        rows = cache["rows"]
+        mode = "buy" if g("mode") == "buy" else "sell"
+        for r in rows:
+            r["week"] = hist.week(market, r["id"])
+        region = MARKETS[market][1]
+        cands = [r["id"] for r in rows if r["src"] not in ("bpc", "lp") and any(r[m] and r[m]["profit"] > 0 and not r[m]["odd"] for m in ("sell", "buy"))
+                 and now - (hist.d.get(f"{region}:{r['id']}") or [0])[0] >= HISTORY_TTL]
+        if cands and ctx.online is not None and not getattr(hist, "running", False):
+            threading.Thread(target=hist.fill, args=(market, cands), name="industry-history", daemon=True).start()
+        q, cat = g("q").strip().casefold(), g("cat")
+        sel = [r for r in rows if (r[mode] and r[mode]["profit"] > 0) or g("all") == "1"]
+        odd = sum(1 for r in sel if r[mode] and r[mode]["odd"])
+        if g("odd") != "1":
+            sel = [r for r in sel if not (r[mode] and r[mode]["odd"])]
+        rare = sum(1 for r in sel if r["src"] in ("bpc", "lp"))
+        if g("bpc") != "1":                                       # редкие копии и чертежи из LP-магазина — по желанию
+            sel = [r for r in sel if r["src"] not in ("bpc", "lp")]
+        thin = sum(1 for r in sel if r["week"] is not None and r["week"] < 7)
+        if g("thin") != "1":                                      # продаётся реже раза в день — по желанию
+            sel = [r for r in sel if r["week"] is None or r["week"] >= 7]
+        if g("sure") == "1":
+            sel = [r for r in sel if r["sure"]]
+        if q:
+            sel = [r for r in sel if q in r["name"].casefold()]
+        if cat in CATEGORIES or cat == "other":
+            sel = [r for r in sel if r["cat"] == cat]
+        sort = g("sort", "isk_hour") if g("sort", "isk_hour") in SORTS else "isk_hour"
+        sel.sort(key=lambda r: SORTS[sort](r, mode), reverse=True)
+        try:
+            page = max(1, int(g("page", "1")))
+        except ValueError:
+            page = 1
+        per = 20
+        counts = {}
+        for m in MARKETS:
+            if m == market:
+                counts[m] = sum(1 for r in rows if r["sell"] and r["sell"]["profit"] > 0)
+        shown = sel[(page - 1) * per: page * per]
+        if ctx.online is not None and shown:                       # иконки видимых карточек
+            ids = [r["id"] for r in shown]
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="industry-icons", daemon=True).start()
+        return {"ok": True, "market": market, "market_name": MARKETS[market][0], "status": st, "total": len(sel),
+                "page": page, "pages": max(1, -(-len(sel) // per)), "rows": shown,
+                "counts": counts, "scanned": len(rows), "settings": s, "prices": ctx.online is not None, "odd": odd,
+                "rare": rare, "thin": thin, "demand": {"running": getattr(hist, "running", False), "done": getattr(hist, "done", 0),
+                                                       "todo": getattr(hist, "todo", 0)},
+                "ages": {m: hub.age(m) for m in MARKETS}}
+
+    def scan_refresh(body, qs=None):
+        market = str((body or {}).get("market") or "jita") if isinstance(body, dict) else "jita"
+        if market not in MARKETS:
+            return {"ok": False, "message": "Неизвестный хаб"}
+        if ctx.online is None:
+            return {"ok": False, "message": "Онлайн-функции выключены (online_enabled в config.json)."}
+        threading.Thread(target=hub.refresh, args=(market,), name="industry-hub", daemon=True).start()
+        threading.Thread(target=calc.refresh_static, name="industry-static", daemon=True).start()
+        return {"ok": True, "message": "Загружаю цены хаба…"}
+
+    def history(qs):
+        market = (qs.get("market") or ["jita"])[0]
+        market = market if market in MARKETS else "jita"
+        try:
+            ids = [int(x) for x in (qs.get("ids") or [""])[0].split(",") if x.strip()][:40]
+        except ValueError:
+            ids = []
+        return {"ok": True, "history": hist.get(market, ids)}
+
+    def save_settings(body, qs=None):
+        if not isinstance(body, dict) or not isinstance(body.get("settings"), dict):
+            return {"ok": False, "message": "Неверный запрос"}
+        cur = load_settings()
+        s = clean_settings(body["settings"])
+        try:
+            ctx.core.atomic_write_json(path, {"settings": s, "product": cur["product"]})
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+        return {"ok": True, "settings": s}
+
+    ctx.get("/api/industry/scan", scanner)
+    ctx.post("/api/industry/scan/refresh", scan_refresh)
+    ctx.get("/api/industry/history", history)
+    ctx.post("/api/industry/settings", save_settings)
     ctx.post("/api/industry", run)
     ctx.get("/api/industry/search", lambda qs: {"ok": True, "items": calc.search((qs.get("q") or [""])[0])})
     ctx.get("/api/industry/settings", lambda qs: {"ok": True, **load_settings(), "prices": ctx.online is not None,

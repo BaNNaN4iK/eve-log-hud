@@ -191,3 +191,61 @@ class TestIndustryHttp(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScanner(unittest.TestCase):
+    """Цены всего хаба (страницы ордеров региона), прибыльность чертежей, защита от ловушек, спрос."""
+
+    def hub(self, orders):
+        pages = [orders[i:i + 2] for i in range(0, len(orders), 2)] or [[]]
+        return ind.Hub("", get_page=lambda region, page: (pages[page - 1], len(pages)), workers=2)
+
+    def test_hub_and_scan(self):
+        J = 60003760
+        o = lambda t, p, buy=False, loc=J, v=10: {"type_id": t, "price": p, "is_buy_order": buy, "location_id": loc, "volume_remain": v}
+        hub = self.hub([o(2456, 330000), o(2456, 300000, True), o(2456, 1, loc=1),           # чужая станция не в счёт
+                        o(2454, 4000), o(2454, 3800, True), o(11399, 10000), o(38, 600), o(34, 4), o(35, 15),
+                        o(16670, 50000), o(4247, 20000), o(16655, 300)])
+        hub.refresh("jita", now=1000)
+        b = hub.book("jita")
+        self.assertEqual((b[2456]["sell"], b[2456]["buy"], b[2456]["sv"]), (330000, 300000, 10))
+        self.assertEqual(hub.state("jita")["done"], hub.state("jita")["pages"])
+        data = dict(DATA, bp=dict(DATA["bp"]))
+        data["bp"]["2456"] = DATA["bp"]["2456"] + ["inv"]                                   # T2 из изобретения
+        c = ind.Calculator(None, data)
+        c.hub = hub
+        c.adjusted, c.average = (1000, dict(ADJ)), {2456: 320000.0, 16670: 1000.0}
+        c.indices = (1000, {30000142: {"manufacturing": 0.05, "reaction": 0.02}})
+        rows = {r["id"]: r for r in ind.scan(c, "jita", ind.clean_settings({"me": 10}), 1000)}
+        h2 = rows[2456]
+        self.assertEqual(h2["src"], "inv")
+        mats = 4000 * 1 + 10000 * ind.mat_qty(2, 1, 0.98) + 600 * ind.mat_qty(10, 1, 0.98)      # ME 2 у копии T2
+        eiv = 3000 + 2 * 9000 + 10 * 500
+        self.assertAlmostEqual(h2["cost"], mats + eiv * (0.05 + 0.0025 + 0.04))
+        self.assertAlmostEqual(h2["sell"]["profit"], 330000 * (1 - 0.051) - h2["cost"])
+        self.assertAlmostEqual(h2["buy"]["profit"], 300000 * (1 - 0.036) - h2["cost"])
+        self.assertTrue(h2["sure"])
+        self.assertTrue(rows[16670]["sell"]["odd"])                                          # 50 000 при средней 1 000
+        self.assertFalse(rows[16670]["sure"])
+        self.assertEqual(rows[2454]["src"], "bpo")
+
+    def test_lp_guess(self):
+        hub = self.hub([{"type_id": 2454, "price": 900000, "is_buy_order": False, "location_id": 60003760},
+                        {"type_id": 34, "price": 4, "is_buy_order": False, "location_id": 60003760},
+                        {"type_id": 35, "price": 15, "is_buy_order": False, "location_id": 60003760}])
+        hub.refresh("jita", now=1000)
+        c = ind.Calculator(None, DATA)
+        c.hub = hub
+        c.indices = (1000, {})
+        r = {x["id"]: x for x in ind.scan(c, "jita", ind.clean_settings({}), 1000)}[2454]
+        self.assertEqual(r["src"], "lp")                                                     # маржа > 85% — чертёж не с рынка
+
+    def test_history_week_by_date(self):
+        import time as _t
+        now = 2_000_000_000
+        day = lambda k: _t.strftime("%Y-%m-%d", _t.gmtime(now - k * 86400))
+        esi = lambda path, **kw: ([{"date": day(30), "volume": 1000}, {"date": day(3), "volume": 5}, {"date": day(1), "volume": 7}], {})
+        h = ind.History(esi)
+        got = h.get("jita", [2456], now=now)["2456"]
+        self.assertEqual((got["week"], got["last"]), (12, 7))                                # старая запись не в неделе
+        self.assertEqual(h.week("jita", 2456), 12)

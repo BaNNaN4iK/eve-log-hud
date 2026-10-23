@@ -10,7 +10,8 @@
 
 Формат:
   {"v": 1, "built": "<дата>",
-   "bp":    {"<продукт>": [чертёж, "m"|"r", время_с, выход_за_прогон, [[материал, кол-во], ...], макс_прогонов]},
+   "bp":    {"<продукт>": [чертёж, "m"|"r", время_с, выход_за_прогон, [[материал, кол-во], ...], макс_прогонов, откуда]},
+            откуда: "bpo" — оригинал продаётся на рынке, "inv" — копия из изобретения (T2/T3), "bpc" — только редкие копии
    "types": {"<type_id>": [name_en, group_id, category_id, объём]},
    "groups": {"<group_id>": название}}
 """
@@ -30,6 +31,10 @@ for act_id, tid, q in BlueprintActivityMaterial.objects.filter(
     if q:
         mats[act_id].append([tid, q])
 
+# откуда берут чертёж: оригинал с рынка (есть группа рынка) или изобретение; иначе — только редкие копии
+invented = set(BlueprintActivityProduct.objects.filter(blueprint_activity__activity="invention").values_list("item_type_id", flat=True))
+on_market = set(ItemType.objects.filter(market_group__isnull=False, group__category_id=9).values_list("id", flat=True))
+
 bp = {}
 used = set()
 rows = (BlueprintActivityProduct.objects.filter(blueprint_activity__activity__in=list(KIND), item_type__published=True,
@@ -41,7 +46,8 @@ for product, qty, act_id, activity, t, max_runs, bp_id in rows:
     m = sorted(mats.get(act_id, []))
     if not m or str(product) in bp:
         continue
-    bp[str(product)] = [bp_id, KIND[activity], t or 0, qty or 1, m, max_runs or 0]
+    src = "inv" if bp_id in invented else "bpo" if bp_id in on_market else "bpc"
+    bp[str(product)] = [bp_id, KIND[activity], t or 0, qty or 1, m, max_runs or 0, src]
     used.add(product)
     used.update(x for x, _ in m)
 

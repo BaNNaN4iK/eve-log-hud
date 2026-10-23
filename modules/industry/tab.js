@@ -29,6 +29,7 @@
     sell: '«Своим ордером» — выставляете продукт на продажу (дороже, плюс комиссия брокера). «Сразу» — продаёте в ордера покупки (дешевле, но мгновенно).',
     salestax: 'Налог с продаж: берётся с каждой продажи. Зависит от навыка Accounting (при Accounting 5 около 3,6%).',
     broker: 'Комиссия брокера за выставление ордера — только если продаёте своим ордером. Зависит от навыков и репутации (обычно 1–3%).',
+    sc_sure: 'Только то, что выгодно и при продаже своим ордером, и при мгновенной продаже в ордера покупки, без подозрительных цен.',
     t_cost: 'Сколько стоит всё производство: материалы, которые покупаете, плюс стоимость всех работ (включая компоненты, которые строите сами).',
     t_mat: 'Материалы, которые покупаете, по выбранной цене. Ниже — сколько стоят сами запуски работ.',
     t_rev: 'Сколько выручите за продукт по выбранной цене, и сколько уйдёт на налог с продаж и брокера.',
@@ -65,8 +66,25 @@
       '.in-tip{display:none;position:absolute;z-index:20;top:calc(100% + 6px);left:-8px;width:280px;padding:8px 10px;border-radius:8px;background:var(--panel);' +
       'border:1px solid var(--line);box-shadow:0 6px 24px rgba(0,0,0,.35);color:var(--text);font-size:12.5px;font-weight:400;line-height:1.4;white-space:normal;text-align:left}\n' +
       '.in-help:hover .in-tip,.in-help:focus .in-tip{display:block}\n' +
+      '.in-views{display:flex;gap:6px;margin-bottom:12px}.in-chip{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:6px 12px;cursor:pointer;font:inherit;font-size:13px}\n' +
+      '.in-chip:hover{color:var(--text)}.in-chip.on{color:var(--text);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 18%,var(--panel2))}.in-chip .n{opacity:.65;margin-left:4px;font-size:11.5px}\n' +
+      '.in-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.in-back{font-size:13px;cursor:pointer;color:var(--muted);background:none;border:0;padding:0;margin-bottom:8px}.in-back:hover{color:var(--text)}\n' +
+      '.in-cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}@media(max-width:760px){.in-cmp{grid-template-columns:1fr}}\n' +
+      '.in-cmp>div{background:var(--panel2);border-radius:10px;padding:10px 14px;border-top:3px solid var(--c)}.in-cmp h3{margin:0 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}\n' +
+      '.in-cmp dl{display:grid;grid-template-columns:1fr auto;gap:3px 12px;margin:0;font-variant-numeric:tabular-nums}.in-cmp dt{color:var(--muted)}.in-cmp dd{margin:0;text-align:right}\n' +
+      '.in-cmp .tot{border-top:1px solid var(--line);padding-top:4px;margin-top:2px;font-weight:650}\n' +
+      '.sc-card{display:grid;grid-template-columns:44px 1fr auto 18px;gap:4px 12px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;cursor:pointer}\n' +
+      '.sc-card:hover,.sc-card:focus{border-color:var(--accent);outline:none}.sc-ico{width:40px;height:40px;border-radius:6px;background:var(--panel)}.sc-ico img{width:40px;height:40px;border-radius:6px;margin:0}.sc-name{font-weight:650;font-size:14.5px}\n' +
+      '.sc-meta{font-size:12px;color:var(--muted);margin-top:2px}.sc-meta b{color:var(--text);font-weight:600}.sc-right{text-align:right;font-variant-numeric:tabular-nums}\n' +
+      '.sc-big{font-size:18px;font-weight:700;color:var(--good)}.sc-big.neg{color:var(--bad)}.sc-sub{font-size:12px;color:var(--muted)}.sc-arrow{color:var(--muted);font-size:18px}\n' +
+      '.sc-badge{display:inline-block;font-size:10.5px;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:2px;border:1px solid var(--line);color:var(--muted)}\n' +
+      '.sc-badge.sure{color:var(--good);border-color:var(--good)}.sc-badge.t2{color:var(--accent);border-color:var(--accent)}.sc-badge.lp{color:var(--warn);border-color:var(--warn)}\n' +
+      '.sc-bar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:6px}.sc-bar>div{height:100%;background:var(--accent);transition:width .4s}\n' +
+      '.sc-pages{display:flex;gap:6px;justify-content:center;margin-top:12px;flex-wrap:wrap}\n' +
       '.tile.in-t{position:relative;cursor:help}.tile.in-t .k{text-decoration:underline dotted;text-underline-offset:3px}.tile.in-t:hover .in-tip,.tile.in-t:focus .in-tip{display:block}',
-    html: '<section class="panel"><h2>Калькулятор производства <span class="muted small">материалы, стоимость работы, время и прибыль</span></h2>' +
+    html: '<div class="in-views" role="tablist" aria-label="Экран производства"><button type="button" class="in-chip" id="inViewScan" role="tab">Сканер прибыльности</button>' +
+      '<button type="button" class="in-chip" id="inViewCalc" role="tab">Калькулятор</button></div><div id="inScanView"></div><div id="inCalcView">' +
+      '<section class="panel"><h2>Калькулятор производства <span class="muted small">материалы, стоимость работы, время и прибыль</span></h2>' +
       '<div class="in-grid" style="grid-template-columns:minmax(260px,2fr) repeat(3,minmax(110px,1fr))">' +
       '<label class="small muted">' + lab('Что строим', 'product') + '<input id="inProduct" list="inList" autocomplete="off" spellcheck="false" placeholder="например: Vexor, Hobgoblin II, Ishtar"><datalist id="inList"></datalist></label>' +
       inp('inRuns', 'Прогонов', '1', 'runs') + lv('inMe', 'ME чертежа', 10, 'me') + lv('inTe', 'TE чертежа', 20, 'te') +
@@ -91,9 +109,11 @@
       inp('inSalesTax', 'Налог с продаж, %', '3,6', 'salestax') + inp('inBroker', 'Брокер, %', '1,5', 'broker') +
       '</div></details>' +
       '<div class="controls" style="margin-top:10px"><button type="button" class="btn primary" id="inGo">Посчитать</button>' +
-      '<span class="small" id="inMsg" role="status" aria-live="polite"></span></div></section><div id="inResult"></div>',
+      '<span class="small" id="inMsg" role="status" aria-live="polite"></span></div></section><div id="inResult"></div></div>',
     render: function () {
       init();
+      showView();
+      if (I.view === 'scan') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(); return; }
       var key = JSON.stringify((ELW.S && ELW.S.sort) || {});             // ядро зовёт render() каждые 4 с и при сортировке
       if (I.sortKey !== key) { I.sortKey = key; draw(); }
     } });
@@ -101,7 +121,31 @@
   var F = [['inRuns', 'runs'], ['inMe', 'me'], ['inTe', 'te'], ['inStruct', 'structure'], ['inRig', 'rig'], ['inSec', 'security'], ['inSystem', 'system'],
     ['inIndex', 'cost_index'], ['inTax', 'facility_tax'], ['inScc', 'scc'], ['inInd', 'industry'], ['inAdv', 'adv_industry'], ['inReact', 'reactions'],
     ['inCme', 'comp_me'], ['inCte', 'comp_te'], ['inMarket', 'market'], ['inBuy', 'buy_mode'], ['inSell', 'sell_mode'], ['inSalesTax', 'sales_tax'], ['inBroker', 'broker']];
-  var I = { inited: false, res: null, build: [], t: null };
+  var I = { inited: false, res: null, build: [], t: null, view: 'scan', week: null };
+  try { I.view = localStorage.getItem('elw.industry.view') === 'calc' ? 'calc' : 'scan'; } catch (e) { }
+  function showView() {
+    $('inScanView').hidden = I.view !== 'scan'; $('inCalcView').hidden = I.view !== 'calc';
+    $('inViewScan').classList.toggle('on', I.view === 'scan'); $('inViewCalc').classList.toggle('on', I.view === 'calc');
+    $('inViewScan').setAttribute('aria-selected', I.view === 'scan'); $('inViewCalc').setAttribute('aria-selected', I.view === 'calc');
+  }
+  function setView(v) {
+    I.view = v;
+    try { localStorage.setItem('elw.industry.view', v); } catch (e) { }
+    showView();
+    if (v === 'scan' && window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(true);
+    window.scrollTo(0, 0);
+  }
+  // для сканера (scan.js): открыть предмет в калькуляторе, общие настройки и подсказки
+  window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
+  ELW_INDUSTRY.open = function (name, src, me, te) {
+    $('inProduct').value = name; $('inRuns').value = '1'; I.build = [];
+    if (src === 'inv') { $('inMe').value = '2'; $('inTe').value = '4'; }           // копия после изобретения
+    else if (me !== undefined && me !== null) { $('inMe').value = String(me); $('inTe').value = String(te); }   // как в сканере
+    setView('calc'); calc();
+  };
+  ELW_INDUSTRY.settings = function () { return settings(); };
+  ELW_INDUSTRY.help = function (key) { return help(key); };
+  ELW_INDUSTRY.ico = function (t) { return ico(t); };
 
   function settings() {
     var s = { build: I.build };
@@ -148,6 +192,8 @@
   $('inProduct').addEventListener('change', function () { I.build = []; });
   $('inProduct').addEventListener('keydown', function (e) { if (e.key === 'Enter') calc(); });
   $('inGo').addEventListener('click', function () { calc(); });
+  $('inViewScan').addEventListener('click', function () { setView('scan'); });
+  $('inViewCalc').addEventListener('click', function () { setView('calc'); });
 
   function calc() {
     var msg = $('inMsg'), btn = $('inGo');
@@ -157,8 +203,12 @@
       btn.disabled = false;
       if (!j.ok) { msg.innerHTML = '<span class="in-bad">' + esc(j.message || 'Не получилось.') + '</span>'; return; }
       msg.textContent = j.note || '';
-      I.res = j; I.build = j.settings.build || [];
+      I.res = j; I.build = j.settings.build || []; I.week = null;
       draw();
+      api('/api/industry/history?market=' + encodeURIComponent(j.settings.market) + '&ids=' + j.product.type_id).then(function (h) {
+        var w = h.history && h.history[String(j.product.type_id)];
+        if (w && I.res === j) { I.week = w; draw(); }
+      }, function () { });
       setTimeout(function () { if (I.res === j) draw(); }, 4000);           // иконки догружаются
     }, function () { btn.disabled = false; msg.textContent = 'Нет связи с трекером.'; });
   }
@@ -166,7 +216,7 @@
   // строки материалов: дерево с вложенными компонентами, которые строим сами
   function matRows(node, depth, out) {
     node.materials.forEach(function (m) {
-      out.push({ m: m, depth: depth });
+      out.push({ m: m, depth: depth, runs: node.runs });
       if (m.build) matRows(m.build, depth + 1, out);
     });
     return out;
@@ -180,17 +230,30 @@
       return '<div class="tile' + (key ? ' in-t" tabindex="0' : '') + '"><div class="k">' + k + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div><div class="s">' + (s || '') + '</div>' +
         (key ? '<span class="in-tip" role="tooltip">' + esc(HELP[key]) + '</span>' : '') + '</div>';
     };
-    var h = '<section class="panel"><h2>' + ico(p.type_id) + esc(p.name) + ' <span class="muted small">' + (p.kind === 'r' ? 'реакция' : 'производство') + ' · ' + L.fmtInt(p.units) + ' шт. · ' +
+    var cmp = r.compare || {}, cs = cmp.sell || {}, cb = cmp.buy || {}, best = cs.isk_hour !== null && cs.isk_hour !== undefined ? cs : cb;
+    var week = I.week;
+    var h = '<section class="panel"><button type="button" class="in-back" id="inBack">← к сканеру</button><h2>' + ico(p.type_id) + esc(p.name) + ' <span class="muted small">' + (p.kind === 'r' ? 'реакция' : 'производство') + ' · ' + L.fmtInt(p.units) + ' шт. · ' +
       esc(r.market_name) + (r.cost_index !== null && r.cost_index !== undefined ? ' · индекс ' + String(Math.round(r.cost_index * 100) / 100).replace('.', ',') + '%' + (r.system ? ' (' + esc(r.system) + ')' : '') : '') + '</span></h2>';
     if (r.warning) h += '<p class="small in-bad">' + esc(r.warning) + '</p>';
     if (r.cost_index === null || r.cost_index === undefined) h += '<p class="small muted">Стоимость работы не посчитана: укажите систему (индекс возьмётся из игры) или впишите свой индекс.</p>';
     if (r.missing_price && r.missing_price.length) h += '<p class="small" style="color:var(--warn)">Нет цены на рынке: ' + esc(r.missing_price.join(', ')) + '</p>';
     h += '<div class="tiles">' +
+      tile('ISK в час', isk(cs.isk_hour), 'продажа своим ордером', cs.isk_hour > 0 ? 'in-good' : cs.isk_hour < 0 ? 'in-bad' : '', 't_iskh') +
+      tile('Прибыль за прогон', isk(cs.per_run), r.tree.runs > 1 ? 'за все прогоны ' + isk(cs.profit) : '', cs.per_run > 0 ? 'in-good' : cs.per_run < 0 ? 'in-bad' : '', 't_profit') +
+      tile('Маржа', cs.margin === null || cs.margin === undefined ? '—' : String(cs.margin).replace('.', ',') + '%', 'мгновенно ' + (cb.margin === null || cb.margin === undefined ? '—' : String(cb.margin).replace('.', ',') + '%')) +
+      tile('Спрос за неделю', week ? L.fmtInt(week.week) : '…', week ? (week.week ? '≈ ' + L.fmtInt(Math.round(week.week / 7)) + ' в день' : 'продаж не было') : 'загружаю', week && week.week < 7 ? 'in-bad' : '') + '</div>';
+    var col = function (title, c, color, mode) {
+      var row = function (k, v, cls) { return '<dt' + (cls ? ' class="' + cls + '"' : '') + '>' + k + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + v + '</dd>'; };
+      return '<div style="--c:' + color + '"><h3>' + title + '</h3><dl>' +
+        row('Цена продукта', isk(c.price)) + row('Выручка', isk(c.revenue)) + row('Налоги' + (mode === 'sell' ? ' и брокер' : ''), c.fees === null || c.fees === undefined ? '—' : '−' + isk(c.fees)) +
+        row('Материалы', t.materials === null ? '—' : '−' + isk(t.materials)) + row('Работы', t.jobs === null ? '—' : '−' + isk(t.jobs)) +
+        row('Прибыль', '<span class="' + (c.profit > 0 ? 'in-good' : c.profit < 0 ? 'in-bad' : '') + '">' + isk(c.profit) + '</span>', 'tot') +
+        row('ISK в час', isk(c.isk_hour)) + row('Маржа', c.margin === null || c.margin === undefined ? '—' : String(c.margin).replace('.', ',') + '%') + '</dl></div>';
+    };
+    h += '<div class="in-cmp">' + col('Продажа своим ордером', cs, 'var(--good)', 'sell') + col('Мгновенная продажа', cb, 'var(--accent)', 'buy') + '</div>';
+    h += '<div class="tiles" style="margin-top:12px">' +
       tile('Себестоимость', isk(t.cost), 'за штуку ' + isk(t.per_unit) + ' ISK', '', 't_cost') +
       tile('Материалы', isk(t.materials), 'работы ' + isk(t.jobs) + ' ISK', '', 't_mat') +
-      tile('Продажа', isk(t.revenue), 'за штуку ' + isk(p.price) + ' · налоги ' + isk(t.fees), '', 't_rev') +
-      tile('Прибыль', isk(t.profit), t.margin === null || t.margin === undefined ? '' : 'маржа ' + String(t.margin).replace('.', ',') + '%', t.profit > 0 ? 'in-good' : t.profit < 0 ? 'in-bad' : '', 't_profit') +
-      tile('ISK в час', isk(t.isk_hour), 'по времени всех работ', '', 't_iskh') +
       tile('Время', dur(t.top_time), r.jobs.length > 1 ? 'всех работ подряд ' + dur(t.time) : '', '', 't_time') +
       tile('Закупка', L.fmtInt(t.volume) + ' м³', r.shopping.length + ' позиций', '', 't_vol') + '</div>';
     if (/ II$| III$/.test(p.name) || r.tree.materials.some(function (m) { return m.kind && /^(R\.A\.M|Construction Blocks)/.test(m.name); })) {
@@ -204,14 +267,15 @@
       'всё покупается: построить по чертежу здесь ничего нельзя (минералы и другое сырьё добывают)') + '</h3>' +
       table('inMats', rows.map(function (x) {
         var m = x.m, price = up[String(m.type_id)];
-        return { name: m.name, qty: m.qty, depth: x.depth, m: m, price: price, total: price !== null && price !== undefined ? price * m.qty : null };
+        return { name: m.name, qty: m.qty, depth: x.depth, runs: x.runs, m: m, price: price, total: price !== null && price !== undefined ? price * m.qty : null };
       }), [
         { k: '', t: 'Материал', l: 1, f: function (x) {
           var m = x.m;
           return '<span class="in-ind" style="padding-left:' + (x.depth * 22) + 'px">' + ico(m.type_id) + esc(m.name) + '</span>' +
             (m.build ? '<div class="in-sub" style="padding-left:' + (x.depth * 22 + 25) + 'px">строю: ' + L.fmtInt(m.build.runs) + ' прог. → ' + L.fmtInt(m.build.out) + ' шт.' + (m.build.out > m.qty ? ', останется ' + L.fmtInt(m.build.out - m.qty) : '') + '</div>' : '');
         } },
-        { k: '', t: 'Нужно', f: function (x) { return esc(L.fmtInt(x.qty)); } },
+        { k: '', t: 'По чертежу', title: 'Сколько нужно без ME и бонусов: количество в чертеже × прогоны', f: function (x) { return '<span class="muted">' + esc(L.fmtInt(x.m.base * x.runs)) + '</span>'; } },
+        { k: '', t: 'Нужно', title: 'После ME, структуры и ригов', f: function (x) { return esc(L.fmtInt(x.qty)); } },
         { k: '', t: 'Цена', f: function (x) { return x.m.build ? '<span class="muted">строю</span>' : esc(isk(x.price)); } },
         { k: '', t: 'Купить за', f: function (x) { return x.m.build ? '<span class="muted">' + esc(isk(x.total)) + '</span>' : esc(isk(x.total)); } },
         { k: '', t: 'Строю сам', f: function (x) {
@@ -253,6 +317,7 @@
     calc();
   });
   $('inResult').addEventListener('click', function (e) {
+    if (e.target.id === 'inBack') { setView('scan'); return; }
     if (e.target.id !== 'inCopy' || !I.res) return;
     var text = I.res.shopping.map(function (x) { return x.name + ' ' + x.qty; }).join('\n'), msg = $('inCopyMsg');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = 'Скопировано — вставляется в «Купить несколько» на рынке игры.'; }, function () { msg.textContent = 'Не удалось.'; });
