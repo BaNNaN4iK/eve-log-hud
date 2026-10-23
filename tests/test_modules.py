@@ -45,7 +45,7 @@ class TestModules(unittest.TestCase):
 
     def test_bundled_modules_are_valid(self):
         mods = {m.id: m for m in modkit.discover(MODULES)}
-        self.assertEqual(sorted(mods), ["alliance_auth", "appraisal", "damage_types", "fleet", "overlay", "reprocess"])
+        self.assertEqual(sorted(mods), ["alliance_auth", "appraisal", "damage_types", "fleet", "industry", "overlay", "reprocess"])
         for m in mods.values():
             target = m.meta.get("entry") or m.meta.get("process")
             self.assertTrue(os.path.isfile(os.path.join(m.path, target)), m.id)

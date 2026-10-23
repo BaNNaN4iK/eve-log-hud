@@ -40,7 +40,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Iterable, List, Optional, Tuple
 
-VERSION = "2.3.3"
+VERSION = "2.4.0"
 UPDATE_REPO = "BaNNaN4iK/eve-log-hud"                     # официальный репозиторий для обновлений: «владелец/репозиторий»
 APP_NAME = "EVE Log Watcher"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1487,7 +1487,7 @@ class Online:
         if u.hostname not in ALLOWED_HOSTS:
             raise OnlineError(f"Хост {u.hostname} не входит в список разрешённых")
         data = None
-        headers = {"User-Agent": self._ua(), "Accept": "*/*" if binary else "application/json"}
+        headers = {"User-Agent": self._ua(), "Accept": "*/*" if binary else "application/json", "Accept-Encoding": "gzip"}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -1496,6 +1496,9 @@ class Online:
             with urllib.request.urlopen(req, timeout=20) as resp:
                 raw = resp.read()
                 hdrs = resp.headers
+                if hdrs.get("Content-Encoding") == "gzip":                  # большие списки ESI без сжатия идут минутами
+                    import zlib
+                    raw = zlib.decompress(raw, 16 + zlib.MAX_WBITS)
                 self._respect_error_limit(hdrs)
                 return (raw if binary else json.loads(raw.decode("utf-8"))), hdrs
         except urllib.error.HTTPError as e:
