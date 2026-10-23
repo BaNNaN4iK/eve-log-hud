@@ -26,7 +26,9 @@
       '.bt-tag{font-size:11px;color:var(--muted)} .bt-fleet{color:var(--good);font-size:11px;margin-left:4px}\n' +
       '.bt-ico{width:20px;height:20px;vertical-align:middle;margin-right:5px;border-radius:3px}\n' +
       '.bt-hi{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}.bt-hi div{background:var(--panel2);border-radius:8px;padding:8px 10px}\n' +
-      '.bt-hi .k{font-size:11.5px;color:var(--muted)} .bt-chart svg{width:100%;height:180px}\n' +
+      '.bt-hi .k{font-size:11.5px;color:var(--muted)} .bt-chart{position:relative} .bt-chart svg{width:100%;height:auto;max-height:260px;display:block;cursor:crosshair}\n' +
+      '.bt-tip{position:absolute;z-index:5;max-width:360px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 6px 24px rgba(0,0,0,.35);pointer-events:none}\n' +
+      '.bt-tip-h{color:var(--muted);font-size:11.5px;margin-bottom:4px}.bt-tip-row{padding:3px 0}.bt-tip-f{margin-top:5px;padding-top:5px;border-top:1px solid var(--line);font-size:11.5px}\n' +
       '.bt-filter button.on{outline:2px solid var(--accent)}',
     html: '<section class="panel"><h2>Отчёт о бое <span class="muted small">по киллмейлам zKillboard — как br.evetools</span></h2>' +
       '<p class="small muted" style="margin-top:0">Укажите систему и время боя (время EVE). Или выберите флот из истории — система и время подставятся, а его пилоты будут нашей стороной.</p>' +
@@ -133,20 +135,96 @@
       cell('Урон нанесён', L.fmtCompact(d.damage_done), 'Сумма урона по киллмейлам: только по убитым кораблям') + cell('Урон получен', L.fmtCompact(d.damage_taken)) + '</div></div>';
   }
 
+  // график: ступеньки по каждому киллмейлу, точка — потеря; наведение показывает событие
+  var CH = { W: 800, H: 200, P: 34, R: 10 };
+  function chartData(R) {
+    var r = R.report, acc = { A: 0, B: 0 }, pts = [];
+    r.timeline.forEach(function (t) {
+      if (t.side !== 'A' && t.side !== 'B') return;
+      acc[t.side] += t.value;
+      pts.push({ t: t.t, side: t.side, km: t, A: acc.A, B: acc.B });
+    });
+    return { pts: pts, max: Math.max(1, acc.A, acc.B), t0: r.t0, span: Math.max(1, r.t1 - r.t0) };
+  }
+  function cx(d, t) { return CH.P + (CH.W - CH.P - CH.R) * (t - d.t0) / d.span; }
+  function cy(d, v) { return CH.H - 22 - (CH.H - 40) * v / d.max; }
   function chart(R) {
-    var s = R.report.series;
-    if (s.length < 2) return '';
-    var W = 800, H = 180, P = 30, max = Math.max(1, s[s.length - 1].A, s[s.length - 1].B);
-    var x = function (i) { return P + (W - P - 8) * i / (s.length - 1); }, y = function (v) { return H - 20 - (H - 34) * v / max; };
-    var line = function (k) { return s.map(function (p, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[k]).toFixed(1); }).join(' '); };
-    return '<div class="bt-chart"><h3 class="small muted" style="margin:14px 0 4px">Потери в ISK нарастающим итогом, по минутам от начала боя</h3>' +
-      '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="График потерь ISK по минутам">' +
-      '<line x1="' + P + '" y1="' + (H - 20) + '" x2="' + W + '" y2="' + (H - 20) + '" stroke="currentColor" stroke-opacity=".25"/>' +
-      '<text x="' + P + '" y="12" font-size="11" fill="currentColor" fill-opacity=".6">' + esc(L.fmtCompact(max)) + ' ISK</text>' +
-      '<text x="' + P + '" y="' + (H - 4) + '" font-size="11" fill="currentColor" fill-opacity=".6">0 мин</text>' +
-      '<text x="' + (W - 8) + '" y="' + (H - 4) + '" font-size="11" text-anchor="end" fill="currentColor" fill-opacity=".6">' + (s.length - 1) + ' мин</text>' +
-      '<path d="' + line('A') + '" fill="none" stroke="' + COL.A + '" stroke-width="2.5"/><path d="' + line('B') + '" fill="none" stroke="' + COL.B + '" stroke-width="2.5"/>' +
-      '</svg><div class="small muted">' + sideDot('A') + 'потери нашей стороны &nbsp; ' + sideDot('B') + 'потери противника</div></div>';
+    var d = chartData(R);
+    if (d.pts.length < 2) return '';
+    B.chart = d;
+    var step = function (k) {
+      var h = 'M' + cx(d, d.t0).toFixed(1) + ' ' + cy(d, 0).toFixed(1), prev = 0;
+      d.pts.forEach(function (p) {
+        var x = cx(d, p.t).toFixed(1);
+        h += ' L' + x + ' ' + cy(d, prev).toFixed(1) + ' L' + x + ' ' + cy(d, p[k]).toFixed(1);
+        prev = p[k];
+      });
+      return h + ' L' + cx(d, d.t0 + d.span).toFixed(1) + ' ' + cy(d, prev).toFixed(1);
+    };
+    var dots = d.pts.map(function (p, i) {
+      return '<circle cx="' + cx(d, p.t).toFixed(1) + '" cy="' + cy(d, p[p.side]).toFixed(1) + '" r="' + (p.km.value >= d.max * 0.05 ? 4.5 : 3) +
+        '" fill="' + COL[p.side] + '" stroke="var(--panel)" stroke-width="1.5" data-i="' + i + '"/>';
+    }).join('');
+    var mins = Math.round(d.span / 60), ticks = '';
+    for (var k = 0; k <= 4; k++) {
+      var tt = d.t0 + d.span * k / 4;
+      ticks += '<text x="' + cx(d, tt).toFixed(1) + '" y="' + (CH.H - 6) + '" font-size="11" text-anchor="' + (k === 0 ? 'start' : k === 4 ? 'end' : 'middle') +
+        '" fill="currentColor" fill-opacity=".6">' + esc(eve(Math.round(tt)).slice(0, 5)) + '</text>';
+    }
+    return '<div class="bt-chart"><h3 class="small muted" style="margin:14px 0 4px">Потери в ISK нарастающим итогом (время EVE, ' + mins + ' мин) — наведите на график</h3>' +
+      '<svg class="bt-svg" viewBox="0 0 ' + CH.W + ' ' + CH.H + '" role="img" aria-label="График потерь ISK: точка — потеря корабля">' +
+      '<line x1="' + CH.P + '" y1="' + cy(d, 0) + '" x2="' + (CH.W - CH.R) + '" y2="' + cy(d, 0) + '" stroke="currentColor" stroke-opacity=".25"/>' +
+      '<line x1="' + CH.P + '" y1="' + cy(d, d.max) + '" x2="' + (CH.W - CH.R) + '" y2="' + cy(d, d.max) + '" stroke="currentColor" stroke-opacity=".08"/>' +
+      '<text x="' + CH.P + '" y="12" font-size="11" fill="currentColor" fill-opacity=".6">' + esc(L.fmtCompact(d.max)) + ' ISK</text>' + ticks +
+      '<path d="' + step('A') + '" fill="none" stroke="' + COL.A + '" stroke-width="2.2"/><path d="' + step('B') + '" fill="none" stroke="' + COL.B + '" stroke-width="2.2"/>' +
+      '<line class="bt-guide" x1="0" x2="0" y1="18" y2="' + cy(d, 0) + '" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 3" visibility="hidden"/>' +
+      dots + '<rect class="bt-hit" x="' + CH.P + '" y="0" width="' + (CH.W - CH.P) + '" height="' + CH.H + '" fill="transparent"/>' +
+      '</svg><div class="bt-tip" role="status" hidden></div>' +
+      '<div class="small muted">' + sideDot('A') + 'потери нашей стороны &nbsp; ' + sideDot('B') + 'потери противника · точка — потерянный корабль (крупная — дорогой)</div></div>';
+  }
+  function chartHover(e) {
+    var svg = e.target.closest && e.target.closest('svg.bt-svg'), d = B.chart;
+    var box = svg && svg.parentNode, tip = box && box.querySelector('.bt-tip');
+    if (!svg || !d || !tip) return;
+    var pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    var loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+    var t = d.t0 + (loc.x - CH.P) / (CH.W - CH.P - CH.R) * d.span;
+    var best = null, bestDx = Infinity;
+    d.pts.forEach(function (p, i) { var dx = Math.abs(p.t - t); if (dx < bestDx) { bestDx = dx; best = i; } });
+    if (best === null) return;
+    var near = d.pts.filter(function (p) { return Math.abs(p.t - d.pts[best].t) <= Math.max(5, d.span / 160); });   // одновременные потери
+    var p = d.pts[best], guide = svg.querySelector('.bt-guide');
+    guide.setAttribute('x1', cx(d, p.t)); guide.setAttribute('x2', cx(d, p.t)); guide.setAttribute('visibility', 'visible');
+    [].forEach.call(svg.querySelectorAll('circle'), function (c) { c.setAttribute('stroke', 'var(--panel)'); });
+    near.forEach(function (q) { var c = svg.querySelector('circle[data-i="' + d.pts.indexOf(q) + '"]'); if (c) c.setAttribute('stroke', 'var(--text)'); });
+    var h = '<div class="bt-tip-h">' + esc(eve(p.t)) + ' EVE · ' + L.fmtDur(p.t - d.t0) + ' от начала</div>';
+    near.slice(0, 6).forEach(function (q) {
+      var k = q.km;
+      h += '<div class="bt-tip-row">' + sideDot(q.side) + ico(k.ship) + '<b>' + esc(nm(k.ship)) + '</b> — ' + esc(nm(k.victim)) +
+        '<div class="bt-tag">' + esc(isk(k.value)) + ' ISK · ' + esc(ent(k.victim_entity)) + (k.final_blow ? ' · добил ' + esc(k.final_blow.c ? nm(k.final_blow.c) : ent(k.final_blow.e)) : '') +
+        ' · атакующих ' + k.attackers + '</div></div>';
+    });
+    if (near.length > 6) h += '<div class="bt-tag">… и ещё ' + (near.length - 6) + '</div>';
+    var last = near[near.length - 1];
+    h += '<div class="bt-tip-f">' + sideDot('A') + 'наши потеряли ' + esc(isk(last.A)) + ' &nbsp; ' + sideDot('B') + 'противник ' + esc(isk(last.B)) + '</div>';
+    tip.innerHTML = h;
+    tip.hidden = false;
+    var bw = box.clientWidth, rect = svg.getBoundingClientRect(), bx = box.getBoundingClientRect();
+    var px = (cx(d, p.t) / CH.W) * rect.width + rect.left - bx.left;
+    var left = px + 14;
+    if (left + tip.offsetWidth > bw) left = Math.max(0, px - 14 - tip.offsetWidth);
+    tip.style.left = left + 'px';
+    tip.style.top = Math.max(0, e.clientY - bx.top - 20) + 'px';
+  }
+  function chartLeave(e) {
+    var svg = e.target.closest && e.target.closest('svg.bt-svg');
+    if (!svg) return;
+    var tip = svg.parentNode.querySelector('.bt-tip');
+    if (tip) tip.hidden = true;
+    var g = svg.querySelector('.bt-guide');
+    if (g) g.setAttribute('visibility', 'hidden');
+    [].forEach.call(svg.querySelectorAll('circle'), function (c) { c.setAttribute('stroke', 'var(--panel)'); });
   }
 
   function highlights(R) {
@@ -246,6 +324,9 @@
     box.innerHTML = h + '</section>';
   }
 
+  $('btReport').addEventListener('mousemove', chartHover);
+  $('btReport').addEventListener('mouseleave', function (e) { chartLeave({ target: $('btReport').querySelector('svg.bt-svg') || e.target }); });
+  $('btReport').addEventListener('mouseout', function (e) { if (e.target.closest && e.target.closest('svg.bt-svg') && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('svg.bt-svg'))) chartLeave(e); });
   $('btReport').addEventListener('click', function (e) {
     var R = B.rep;
     if (!R) return;
