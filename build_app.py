@@ -29,7 +29,7 @@ SEP = os.pathsep                                   # разделитель --ad
 # поэтому всё, что нужно модулям, перечислено здесь (иначе установленный модуль не запустится)
 STDLIB_FOR_MODULES = ["tkinter", "tkinter.ttk", "concurrent.futures", "secrets", "hashlib", "base64", "html", "webbrowser",
                       "shutil", "ctypes.wintypes", "importlib.util", "collections", "urllib.request", "urllib.parse",
-                      "urllib.error", "http.client", "socket", "typing", "argparse", "uuid", "zipfile", "csv", "math"]
+                      "urllib.error", "http.client", "socket", "typing", "argparse", "uuid", "zipfile", "csv", "math", "gzip", "calendar"]
 
 
 def copy_modules(dst: str) -> list:

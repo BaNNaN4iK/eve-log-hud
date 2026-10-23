@@ -7,6 +7,7 @@
   esi_token.json   — кто вошёл и токен обновления (Windows: зашифрован DPAPI; Linux: файл с правами 600)
   fleet_names.json — названия кораблей, систем и имена пилотов (кэш)
   fleets/<id>.json — по файлу на флот: состав, время во флоте, маршруты, отметки ФК
+  battles/<id>.json — отчёты о боях по киллмейлам (battle.py)
 
 Ответы current()/get()/list() имеют тот же вид, что у плагина Fleet Watch, поэтому страница и оверлей
 работают одинаково с обоими источниками.
@@ -695,8 +696,78 @@ class FleetApi:
             ctx.post(path, fn)
 
 
+def load_battle():
+    """battle.py лежит рядом (отчёт о бое по киллмейлам) — загружаем по пути: модуль подключается не как пакет."""
+    import importlib.util
+    import sys
+    name = "elw_mod_fleet_battle"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "battle.py"))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class BattleApi:
+    """Отчёт о бое: собрать по системам и времени (или по флоту из истории), список, перенос групп между сторонами."""
+
+    def __init__(self, local: "LocalFleet", battles):
+        self.local, self.b = local, battles
+        self.mod = load_battle()
+
+    def _raw_fleet(self, fid: int) -> Optional[dict]:
+        with self.local.lock:
+            if self.local.cur is not None and self.local.cur["id"] == fid:
+                return self.local.cur
+            rec = _read(self.local._file(fid), None)
+            return rec if isinstance(rec, dict) and "members" in rec else None
+
+    def _wrap(self, fn):
+        try:
+            return fn()
+        except self.mod.BattleError as e:
+            return {"ok": False, "message": str(e)}
+
+    def list(self, qs) -> dict:
+        return {"ok": True, "battles": self.b.list()}
+
+    def one(self, qs):
+        rec = self.b.load((qs.get("id") or [""])[0])
+        return self.b.view(rec) if rec else (404, {"ok": False, "message": "Отчёт не найден"})
+
+    def job(self, qs) -> dict:
+        return {"ok": True, **self.b.job((qs.get("id") or [""])[0])}
+
+    def prefill(self, qs) -> dict:
+        return self._wrap(lambda: self.b.prefill((qs.get("fleet_id") or ["0"])[0]))
+
+    def build(self, body, qs=None) -> dict:
+        return self._wrap(lambda: self.b.start(body))
+
+    def move(self, body, qs=None) -> dict:
+        body = body if isinstance(body, dict) else {}
+        return self._wrap(lambda: self.b.move(str(body.get("id") or ""), str(body.get("entity") or ""), str(body.get("side") or "")))
+
+    def register(self, ctx) -> None:
+        for path, fn in (("/api/battles", self.list), ("/api/battle", self.one), ("/api/battle/job", self.job),
+                         ("/api/battle/prefill", self.prefill)):
+            ctx.get(path, fn)
+        for path, fn in (("/api/battle/build", self.build), ("/api/battle/move", self.move)):
+            ctx.post(path, fn)
+
+
 def setup(ctx) -> None:
     local = LocalFleet(ctx.data_dir, ctx.cfg.get("esi_client_id") or BUILTIN_CLIENT_ID)
     FleetApi(local, ctx.port, ctx.cfg, ctx.data_dir, ctx.core.atomic_write_json).register(ctx)
+    bmod = load_battle()
+    api = BattleApi(local, None)
+    def icons(type_ids):
+        if ctx.online is not None:
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(t) for t in list(type_ids)[:400]],
+                             name="battle-icons", daemon=True).start()
+    api.b = bmod.Battles(ctx.data_dir, me=lambda: local.auth.character_id, fleet=api._raw_fleet, on_built=icons)
+    api.register(ctx)
     ctx.thread(local.run, "fleet")
     ctx.on_stop(local.stop_thread)
