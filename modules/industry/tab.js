@@ -199,7 +199,9 @@
 
     // материалы (дерево)
     var rows = matRows(r.tree, 0, []);
-    h += '<h3 class="small muted" style="margin:16px 0 6px">Материалы — отметьте, что строите сами, а не покупаете</h3>' +
+    var canBuild = rows.some(function (x) { return x.m.buildable; });
+    h += '<h3 class="small muted" style="margin:16px 0 6px">Материалы — ' + (canBuild ? 'отметьте, что строите сами, а не покупаете' :
+      'всё покупается: построить по чертежу здесь ничего нельзя (минералы и другое сырьё добывают)') + '</h3>' +
       table('inMats', rows.map(function (x) {
         var m = x.m, price = up[String(m.type_id)];
         return { name: m.name, qty: m.qty, depth: x.depth, m: m, price: price, total: price !== null && price !== undefined ? price * m.qty : null };
@@ -214,7 +216,8 @@
         { k: '', t: 'Купить за', f: function (x) { return x.m.build ? '<span class="muted">' + esc(isk(x.total)) + '</span>' : esc(isk(x.total)); } },
         { k: '', t: 'Строю сам', f: function (x) {
           return x.m.buildable ? '<input type="checkbox" data-build="' + x.m.type_id + '"' + (x.m.build ? ' checked' : '') + ' aria-label="Строить ' + esc(x.m.name) + ' самому">' +
-            (x.m.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') : '';
+            (x.m.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') :
+            '<span class="in-sub" title="Для этого материала нет чертежа: его добывают, получают переработкой, на планетах или с NPC">не строится</span>';
         } }
       ], { rowAttrs: function (x) { return x.m.build ? ' class="in-built"' : ''; } });
 
