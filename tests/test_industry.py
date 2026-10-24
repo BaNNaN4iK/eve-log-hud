@@ -249,3 +249,62 @@ class TestScanner(unittest.TestCase):
         got = h.get("jita", [2456], now=now)["2456"]
         self.assertEqual((got["week"], got["last"]), (12, 7))                                # старая запись не в неделе
         self.assertEqual(h.week("jita", 2456), 12)
+
+
+class TestPlan(unittest.TestCase):
+    """План: общие компоненты считаются один раз, остатки от округления, изобретение T2, режимы."""
+
+    def data(self):
+        d = {k: (dict(v) if isinstance(v, dict) else v) for k, v in DATA.items()}
+        d["bp"]["2456"] = DATA["bp"]["2456"] + ["inv"]
+        d["bp"]["99"] = [98, "m", 600, 1, [[2454, 3], [16670, 50]], 10, "bpo"]        # продукт из Hobgoblin I и реакции
+        d["types"]["99"] = ["Combo", 100, 18, 5.0]
+        d["inv"] = {"2457": [2455, 2454, 0.34, 10, [[20418, 1], [20419, 1]], 7800]}
+        d["types"]["20418"] = ["Datacore A", 333, 17, 0.1]
+        d["types"]["20419"] = ["Datacore B", 333, 17, 0.1]
+        return d
+
+    def test_shared_components_leftovers_invention(self):
+        c = ind.Calculator(None, self.data())
+        s = ind.clean_settings({"me": 0, "comp_me": 0, "inv_sci": 0, "inv_enc": 0})
+        r = ind.plan_order(c, [(2456, 10), (99, 2)], s, "full")
+        jobs = {j["type_id"]: j for j in r["jobs"]}
+        self.assertEqual(jobs[2454]["need"], 10 + 6)                               # Hobgoblin I: 10 для T2 + 2×3 для Combo
+        self.assertEqual(jobs[2454]["runs"], 16)
+        self.assertEqual((jobs[16670]["runs"], jobs[16670]["made"]), (1, 200))     # 100 нужно, прогон даёт 200
+        left = {x["type_id"]: x["qty"] for x in r["leftovers"]}
+        self.assertEqual(left[16670], 100)
+        self.assertEqual(jobs[2456]["me"], 2)                                       # T2 — копия после изобретения
+        inv = r["invention"][0]
+        self.assertAlmostEqual(inv["chance"], 0.34)
+        self.assertEqual(inv["attempts"], 3)                                       # 10 прогонов / (0,34 × 10) → 3
+        buy = {x["type_id"]: x for x in r["shopping"]}
+        self.assertEqual(buy[20418]["qty"], 3)
+        self.assertEqual(buy[20418]["group"], "Изобретение: датакоры")
+        self.assertIn(34, buy)                                                      # минералы — покупаются
+        b = ind.plan_order(c, [(2456, 10), (99, 2)], s, "buy")
+        self.assertEqual({j["type_id"] for j in b["jobs"]}, {2456, 99})            # строим только продукты
+        self.assertEqual({x["type_id"]: x["qty"] for x in b["shopping"]}[2454], 16)
+        self.assertEqual(len(b["invention"]), 1)                                    # копия T2 нужна и при закупке
+
+    def test_invention_skills(self):
+        self.assertAlmostEqual(ind.invention_chance(0.34, ind.clean_settings({"inv_sci": 5, "inv_enc": 4})),
+                               0.34 * (1 + 10 / 30 + 4 / 40))
+
+    def test_plan_with_products_and_prices(self):
+        esi = FakeEsi()
+        d = self.data()
+        c = ind.Calculator(esi, d, big=lambda p: esi(p)[0])
+        PRICES.update({99: 500000, 20418: 1000, 20419: 2000})
+        try:
+            r = ind.plan_with_products(c, [(2456, 10)], ind.clean_settings({"system": "Jita", "inv_sci": 0, "inv_enc": 0}), "buy")
+        finally:
+            for k in (99, 20418, 20419):
+                PRICES.pop(k, None)
+        t = r["totals"]
+        self.assertAlmostEqual(t["invention"] - sum(x["job"] for x in r["invention"]), 3 * (1000 + 2000))   # датакоры
+        self.assertAlmostEqual(t["spend"], t["buy"] + t["jobs"] + t["invention"])
+        self.assertAlmostEqual(t["profit"], t["revenue"] - t["cost"])
+        p = r["products"][0]
+        self.assertAlmostEqual(p["cost"], t["cost"])                                # один продукт — тот же итог
+        self.assertAlmostEqual(p["unit_cost"], t["cost"] / 10)

@@ -80,6 +80,7 @@ DEFAULTS = {
     "industry": 5, "adv_industry": 4, "reactions": 4,
     "market": "jita", "buy_mode": "sell", "sell_mode": "sell", "sales_tax": 3.6, "broker": 1.5,
     "comp_me": 10, "comp_te": 20, "build": [],
+    "inv_sci": 4, "inv_enc": 4,
 }
 
 
@@ -102,7 +103,7 @@ def clean_settings(raw: Optional[dict]) -> dict:
     num("te", 0, 20, lambda x: int(float(x)))
     num("comp_me", 0, 10, lambda x: int(float(x)))
     num("comp_te", 0, 20, lambda x: int(float(x)))
-    for k in ("industry", "adv_industry", "reactions"):
+    for k in ("industry", "adv_industry", "reactions", "inv_sci", "inv_enc"):
         num(k, 0, 5, lambda x: int(float(x)))
     for k, hi in (("cost_index", 100.0), ("facility_tax", 50.0), ("scc", 20.0), ("sales_tax", 20.0), ("broker", 20.0)):
         num(k, 0.0, hi)
@@ -476,6 +477,195 @@ class Calculator:
             "cost_index": idx_used[0], "system": idx_used[1], "missing_price": missing_price,
             "market_name": MARKETS[s["market"]][0], "warning": note_hs, "data_built": self.data.get("built"),
         }
+
+
+# ---------------------------------------------------------------------------
+# План производства: несколько продуктов, общие компоненты, полный цикл или закупка
+# ---------------------------------------------------------------------------
+
+INV_BASE_COST = 0.02                   # стоимость запуска изобретения — 2% от ориентировочной стоимости предмета T1
+
+
+def invention_chance(base: float, s: dict) -> float:
+    """Шанс изобретения: база × (1 + (наука₁ + наука₂)/30 + шифрование/40). Обе науки — на уровне inv_sci."""
+    return min(1.0, base * (1 + 2 * s["inv_sci"] / 30 + s["inv_enc"] / 40))
+
+
+def plan_order(calc: "Calculator", items: List[Tuple[int, int]], s: dict, mode: str = "full", now: Optional[float] = None,
+               price_ids: Optional[set] = None, _prices: Optional[dict] = None) -> dict:
+    """Заказ из нескольких продуктов. mode="full" — всё, что строится по чертежу, строим сами (компоненты, реакции,
+    изобретение T2); "buy" — строим только сами продукты, компоненты покупаем. Общие компоненты складываются,
+    округление до целых прогонов даёт остатки."""
+    now = time.time() if now is None else now
+    data = calc.data
+    bps, invs = data["bp"], data.get("inv", {})
+    top: Dict[int, int] = {}
+    for tid, qty in items:
+        if str(tid) in bps and qty > 0:
+            top[tid] = top.get(tid, 0) + int(qty)
+
+    def buildable(t):
+        return str(t) in bps and (t in top or mode == "full")
+
+    # граф: кто из строящегося что потребляет (чтобы общий компонент считался один раз, после всех потребителей)
+    seen, stack, consumers = set(), list(top), defaultdict_int()
+    while stack:
+        t = stack.pop()
+        if t in seen:
+            continue
+        seen.add(t)
+        for m, _ in bps[str(t)][4]:
+            if buildable(m):
+                consumers[m] += 1
+                stack.append(m)
+    need: Dict[int, float] = dict(top)
+    queue = [t for t in seen if consumers.get(t, 0) == 0]
+    buy: Dict[int, int] = {}
+    jobs, inv_rows, left = [], [], {}
+    while queue:
+        t = queue.pop(0)
+        bp = bps[str(t)]
+        bp_id, kind, base_time, out_qty, mats = bp[0], bp[1], bp[2], bp[3], bp[4]
+        src = bp[6] if len(bp) > 6 else "bpo"
+        if t in top:
+            me, te = (2, 4) if src == "inv" else (s["me"], s["te"])
+        else:
+            me, te = s["comp_me"], s["comp_te"]
+        b = bonuses(dict(s, me=me, te=te), kind, True)
+        runs = max(1, math.ceil(need.get(t, 0) / out_qty))
+        made = runs * out_qty
+        left[t] = made - need.get(t, 0)
+        jobs.append({"type_id": t, "name": calc.name(t), "kind": kind, "runs": runs, "made": made, "need": need.get(t, 0),
+                     "time": base_time * runs * b["time"], "top": t in top, "eiv_base": [(m, q) for m, q in mats], "me": me, "te": te})
+        for m, q in mats:
+            qty = mat_qty(q, runs, b["mat"])
+            if m in seen and buildable(m):
+                need[m] = need.get(m, 0) + qty
+                consumers[m] -= 1
+                if consumers[m] == 0:
+                    queue.append(m)
+            else:
+                buy[m] = buy.get(m, 0) + qty
+        # изобретение копий T2 (полный цикл)
+        inv = invs.get(str(bp_id)) if src == "inv" else None         # копия T2 нужна в любом режиме
+        if inv:
+            t1_bp, t1_product, base_p, inv_runs, dcs, inv_time = inv
+            chance = invention_chance(base_p, s)
+            attempts = math.ceil(runs / max(1e-9, chance * inv_runs))
+            for m, q in dcs:
+                buy[m] = buy.get(m, 0) + q * attempts
+            inv_rows.append({"type_id": t, "name": calc.name(t), "runs": runs, "chance": chance, "per_copy": inv_runs,
+                             "attempts": attempts, "t1": t1_product, "datacores": [[m, q * attempts] for m, q in dcs],
+                             "time": inv_time * attempts})
+
+    # цены
+    ids = set(buy) | set(top) | {t for t, v in left.items() if v > 0}
+    prices = _prices if _prices is not None else calc.prices(ids | (price_ids or set()), s["market"], now)
+    have = bool(prices)
+    adj = calc.adjusted_prices(now)
+
+    def price(t, mode_):
+        return (prices.get(t) or {}).get(mode_)
+
+    idx_cache: Dict[str, Optional[float]] = {}
+
+    def index(activity):
+        if activity not in idx_cache:
+            if s["cost_index"] is not None and activity != "invention":
+                idx_cache[activity] = s["cost_index"] / 100
+            else:
+                calc._ensure_static(now, need_index=True)
+                sid = HUB_SYSTEMS.get(s["market"], 0)
+                if s["system"]:
+                    calc.cost_index(s["system"], "m", now)
+                    sid = calc.systems.get(s["system"].strip().casefold()) or sid
+                idx_cache[activity] = calc.indices[1].get(sid, {}).get(activity)
+        return idx_cache[activity]
+
+    job_total = 0.0
+    for j in jobs:
+        idx = index("reaction" if j["kind"] == "r" else "manufacturing")
+        eiv = sum(q * adj.get(m, 0) for m, q in j.pop("eiv_base")) * j["runs"]
+        b = bonuses(s, j["kind"], True)
+        j["eiv"], j["cost"] = eiv, eiv * ((idx or 0) * b["cost"] + s["facility_tax"] / 100 + s["scc"] / 100)
+        job_total += j["cost"]
+    inv_total = 0.0
+    for r in inv_rows:
+        t1 = r["t1"]
+        eiv_t1 = sum(q * adj.get(m, 0) for m, q in (bps.get(str(t1)) or [0, 0, 0, 0, []])[4]) if t1 else 0
+        r["job"] = eiv_t1 * INV_BASE_COST * ((index("invention") or 0) + s["facility_tax"] / 100 + s["scc"] / 100) * r["attempts"]
+        r["datacores_cost"] = sum((price(m, s["buy_mode"]) or 0) * q for m, q in r["datacores"])
+        r["cost"] = r["job"] + r["datacores_cost"]
+        inv_total += r["job"]
+    dc_ids = {m for r in inv_rows for m, _ in r["datacores"]}
+    groups = data.get("groups", {})
+    shopping, buy_total, no_price = [], 0.0, []
+    for t, q in buy.items():
+        pr = price(t, s["buy_mode"])
+        if have and pr is None:
+            no_price.append(calc.name(t))
+        tinfo = data["types"].get(str(t)) or [str(t), 0, 0, 0]
+        group = "Изобретение: датакоры" if t in dc_ids else groups.get(str(tinfo[1]), "Прочее")
+        shopping.append({"type_id": t, "name": calc.name(t), "qty": q, "price": pr, "total": pr * q if pr is not None else None,
+                         "volume": tinfo[3] * q, "group": group})
+        buy_total += pr * q if pr is not None else 0
+    shopping.sort(key=lambda r: (r["group"], -(r["total"] or 0)))
+    leftovers, left_total = [], 0.0
+    for t, v in left.items():
+        if v <= 0:
+            continue
+        pr = price(t, "buy")
+        leftovers.append({"type_id": t, "name": calc.name(t), "qty": v, "price": pr, "total": pr * v if pr is not None else None,
+                          "top": t in top})
+        left_total += pr * v if pr is not None else 0
+    leftovers.sort(key=lambda r: -(r["total"] or 0))
+    revenue = 0.0
+    products = []
+    fee = (s["sales_tax"] + (s["broker"] if s["sell_mode"] == "sell" else 0)) / 100
+    for t, q in top.items():
+        pr = price(t, s["sell_mode"])
+        net = pr * q * (1 - fee) if pr is not None else None
+        revenue += net or 0
+        job = next((j for j in jobs if j["type_id"] == t), {})
+        products.append({"type_id": t, "name": calc.name(t), "qty": q, "made": job.get("made", q), "time": job.get("time", 0),
+                         "price": pr, "net": net, "src": (bps[str(t)][6] if len(bps[str(t)]) > 6 else "bpo"),
+                         "kind": bps[str(t)][1]})
+    dc_total = sum(r["datacores_cost"] for r in inv_rows)
+    buy_total -= dc_total                                      # датакоры — в строке «Изобретение», не в закупке
+    inv_total += dc_total
+    spend = buy_total + job_total + inv_total
+    cost = spend - left_total
+    profit = revenue - cost if have else None
+    return {"top": top, "jobs": jobs, "invention": inv_rows, "shopping": shopping, "leftovers": leftovers, "products": products,
+            "prices": have, "no_price": no_price, "mode": mode,
+            "totals": {"buy": buy_total if have else None, "jobs": job_total, "invention": inv_total, "spend": spend if have else None,
+                       "leftovers": left_total if have else None, "cost": cost if have else None, "revenue": revenue if have else None,
+                       "profit": profit, "roi": round(profit * 100 / cost, 1) if profit is not None and cost else None,
+                       "volume": sum(r["volume"] for r in shopping), "time": sum(j["time"] for j in jobs)}}
+
+
+def defaultdict_int():
+    from collections import defaultdict
+    return defaultdict(int)
+
+
+def plan_with_products(calc: "Calculator", items: List[Tuple[int, int]], s: dict, mode: str, now: Optional[float] = None) -> dict:
+    """Общий план + каждый продукт отдельно (его себестоимость за штуку, маржа, ROI) — на одних и тех же ценах."""
+    now = time.time() if now is None else now
+    whole = plan_order(calc, items, s, mode, now)
+    prices = calc.prices(set().union(*[{r["type_id"] for r in whole["shopping"]}, set(whole["top"]),
+                                     {r["type_id"] for r in whole["leftovers"]}]), s["market"], now) if whole["prices"] else {}
+    for p in whole["products"]:
+        one = plan_order(calc, [(p["type_id"], p["qty"])], s, mode, now, _prices=prices or None)
+        t = one["totals"]
+        p["cost"] = t["cost"]
+        p["unit_cost"] = t["cost"] / p["qty"] if t["cost"] is not None and p["qty"] else None
+        p["unit_net"] = p["net"] / p["qty"] if p["net"] is not None and p["qty"] else None
+        p["profit"] = p["net"] - t["cost"] if p["net"] is not None and t["cost"] is not None else None
+        p["margin"] = round(p["profit"] * 100 / p["net"], 1) if p["profit"] is not None and p["net"] else None
+        p["roi"] = round(p["profit"] * 100 / t["cost"], 1) if p["profit"] is not None and t["cost"] else None
+        p["chain_time"] = t["time"]
+    return whole
 
 
 # ---------------------------------------------------------------------------
@@ -880,6 +1070,82 @@ def setup(ctx) -> None:
             return {"ok": False, "message": str(e)}
         return {"ok": True, "settings": s}
 
+    plans_path = os.path.join(ctx.data_dir, "industry_plans.json")
+
+    def read_plans() -> list:
+        try:
+            with open(plans_path, encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, list) else []
+        except (OSError, ValueError):
+            return []
+
+    def catalog(qs):
+        out = []
+        for key, bp in data["bp"].items():
+            t = data["types"].get(key)
+            if t:
+                out.append([int(key), t[0], category_of(data, int(key)), bp[6] if len(bp) > 6 else "bpo", bp[1]])
+        out.sort(key=lambda r: r[1].casefold())
+        return {"ok": True, "items": out}
+
+    def clean_items(raw) -> List[Tuple[int, int]]:
+        items = []
+        for it in raw if isinstance(raw, list) else []:
+            try:
+                tid, qty = int(it.get("id")), int(float(it.get("qty") or 1))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if str(tid) in data["bp"] and 0 < qty <= 10_000_000:
+                items.append((tid, qty))
+        return items[:60]
+
+    def plan(body, qs=None):
+        if not isinstance(body, dict):
+            return {"ok": False, "message": "Неверный запрос"}
+        items = clean_items(body.get("items"))
+        if not items:
+            return {"ok": False, "message": "Добавьте в план хотя бы один продукт."}
+        s = clean_settings(dict(load_settings()["settings"], **(body.get("settings") or {})) if isinstance(body.get("settings"), dict)
+                           else load_settings()["settings"])
+        mode = "buy" if body.get("mode") == "buy" else "full"
+        try:
+            res = plan_with_products(calc, items, s, mode)
+        except Exception as e:
+            ctx.log.warning("Производство: план не посчитан: %s", e)
+            return {"ok": False, "message": f"Не удалось посчитать: {e}"}
+        if ctx.online is not None:
+            ids = [p["type_id"] for p in res["products"]] + [r["type_id"] for r in res["shopping"]][:80] + [j["type_id"] for j in res["jobs"]][:80]
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="industry-icons", daemon=True).start()
+        res["top"] = {str(k): v for k, v in res["top"].items()}
+        return {"ok": True, "settings": s, "market_name": MARKETS[s["market"]][0], **res}
+
+    def plans(qs):
+        return {"ok": True, "plans": read_plans()}
+
+    def plans_save(body, qs=None):
+        if not isinstance(body, dict):
+            return {"ok": False, "message": "Неверный запрос"}
+        name = str(body.get("name") or "").strip()[:80]
+        if not name:
+            return {"ok": False, "message": "Назовите план."}
+        cur = [p for p in read_plans() if p.get("name") != name]
+        if body.get("action") != "delete":
+            items = clean_items(body.get("items"))
+            if not items:
+                return {"ok": False, "message": "В плане нет продуктов."}
+            cur.insert(0, {"name": name, "items": [{"id": t, "qty": q} for t, q in items],
+                           "mode": "buy" if body.get("mode") == "buy" else "full", "updated": int(time.time())})
+        try:
+            ctx.core.atomic_write_json(plans_path, cur[:100])
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+        return {"ok": True, "plans": cur[:100]}
+
+    ctx.get("/api/industry/catalog", catalog)
+    ctx.post("/api/industry/plan", plan)
+    ctx.get("/api/industry/plans", plans)
+    ctx.post("/api/industry/plans", plans_save)
     ctx.get("/api/industry/scan", scanner)
     ctx.post("/api/industry/scan/refresh", scan_refresh)
     ctx.get("/api/industry/history", history)

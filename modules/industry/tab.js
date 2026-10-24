@@ -29,6 +29,11 @@
     sell: '«Своим ордером» — выставляете продукт на продажу (дороже, плюс комиссия брокера). «Сразу» — продаёте в ордера покупки (дешевле, но мгновенно).',
     salestax: 'Налог с продаж: берётся с каждой продажи. Зависит от навыка Accounting (при Accounting 5 около 3,6%).',
     broker: 'Комиссия брокера за выставление ордера — только если продаёте своим ордером. Зависит от навыков и репутации (обычно 1–3%).',
+    pl_mode: '«Полный цикл» — всё, что строится по чертежу, строите сами: компоненты, реакции из лунных материалов, изобретаете копии T2. «Покупаю компоненты» — строите только сами продукты, всё остальное покупаете.',
+    pl_inv: 'Копии чертежей T2 получают изобретением из копии T1 и датакоров, с шансом. Попыток берётся с запасом: прогоны ÷ (шанс × прогонов в одной копии). Шанс растёт с навыками наук и шифрования (на экране «Калькулятор»).',
+    pl_left: 'Прогон даёт целую пачку, поэтому часто выходит больше, чем нужно. Лишнее остаётся у вас; его стоимость (по цене мгновенной продажи) вычитается из себестоимости.',
+    sci: 'Уровень двух научных навыков для изобретения (например, Mechanical Engineering и Electronic Engineering). Шанс растёт на 1/30 за уровень каждого.',
+    enc: 'Навык шифрования расы (Amarr / Caldari / Gallente / Minmatar Encryption Methods): шанс изобретения +1/40 за уровень.',
     sc_sure: 'Только то, что выгодно и при продаже своим ордером, и при мгновенной продаже в ордера покупки, без подозрительных цен.',
     t_cost: 'Сколько стоит всё производство: материалы, которые покупаете, плюс стоимость всех работ (включая компоненты, которые строите сами).',
     t_mat: 'Материалы, которые покупаете, по выбранной цене. Ниже — сколько стоят сами запуски работ.',
@@ -81,9 +86,14 @@
       '.sc-badge.sure{color:var(--good);border-color:var(--good)}.sc-badge.t2{color:var(--accent);border-color:var(--accent)}.sc-badge.lp{color:var(--warn);border-color:var(--warn)}\n' +
       '.sc-bar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:6px}.sc-bar>div{height:100%;background:var(--accent);transition:width .4s}\n' +
       '.sc-pages{display:flex;gap:6px;justify-content:center;margin-top:12px;flex-wrap:wrap}\n' +
+      'details.in-sec{margin-top:14px;border-top:1px solid var(--line);padding-top:8px}details.in-sec>summary{cursor:pointer;list-style:none;font-size:13px;color:var(--muted);font-weight:600;padding:2px 0 6px}\n' +
+      'details.in-sec>summary::-webkit-details-marker{display:none}details.in-sec>summary::before{content:"\\25B8";display:inline-block;width:1.1em;transition:transform .15s}\n' +
+      'details.in-sec[open]>summary::before{transform:rotate(90deg)}details.in-sec>summary:hover{color:var(--text)}details.in-sec>summary .n{font-weight:400}\n' +
+      'tr.in-rgood>td:first-child{box-shadow:inset 4px 0 0 var(--good)}tr.in-rbad>td:first-child{box-shadow:inset 4px 0 0 var(--bad)}\n' +
       '.tile.in-t{position:relative;cursor:help}.tile.in-t .k{text-decoration:underline dotted;text-underline-offset:3px}.tile.in-t:hover .in-tip,.tile.in-t:focus .in-tip{display:block}',
     html: '<div class="in-views" role="tablist" aria-label="Экран производства"><button type="button" class="in-chip" id="inViewScan" role="tab">Сканер прибыльности</button>' +
-      '<button type="button" class="in-chip" id="inViewCalc" role="tab">Калькулятор</button></div><div id="inScanView"></div><div id="inCalcView">' +
+      '<button type="button" class="in-chip" id="inViewCalc" role="tab">Калькулятор</button><button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button></div>' +
+      '<div id="inScanView"></div><div id="inPlanView"></div><div id="inCalcView">' +
       '<section class="panel"><h2>Калькулятор производства <span class="muted small">материалы, стоимость работы, время и прибыль</span></h2>' +
       '<div class="in-grid" style="grid-template-columns:minmax(260px,2fr) repeat(3,minmax(110px,1fr))">' +
       '<label class="small muted">' + lab('Что строим', 'product') + '<input id="inProduct" list="inList" autocomplete="off" spellcheck="false" placeholder="например: Vexor, Hobgoblin II, Ishtar"><datalist id="inList"></datalist></label>' +
@@ -101,6 +111,7 @@
       lv('inInd', 'Industry', 5, 'ind') + lv('inAdv', 'Advanced Industry', 5, 'adv') +
       lv('inReact', 'Reactions', 5, 'react') +
       lv('inCme', 'ME компонентов', 10, 'cme') + lv('inCte', 'TE компонентов', 20, 'cte') +
+      lv('inSci', 'Науки (изобретение)', 5, 'sci') + lv('inEnc', 'Шифрование', 5, 'enc') +
       '</div></details>' +
       '<details class="in-set"><summary>Цены и налоги</summary><div class="in-grid">' +
       '<label class="small muted">' + lab('Рынок', 'market') + '<select id="inMarket">' + opt('jita', 'Jita 4-4') + opt('amarr', 'Amarr') + opt('dodixie', 'Dodixie') + opt('rens', 'Rens') + opt('hek', 'Hek') + '</select></label>' +
@@ -114,25 +125,29 @@
       init();
       showView();
       if (I.view === 'scan') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(); return; }
+      if (I.view === 'plan') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.plan) ELW_INDUSTRY.plan.render(); return; }
       var key = JSON.stringify((ELW.S && ELW.S.sort) || {});             // ядро зовёт render() каждые 4 с и при сортировке
       if (I.sortKey !== key) { I.sortKey = key; draw(); }
     } });
 
   var F = [['inRuns', 'runs'], ['inMe', 'me'], ['inTe', 'te'], ['inStruct', 'structure'], ['inRig', 'rig'], ['inSec', 'security'], ['inSystem', 'system'],
     ['inIndex', 'cost_index'], ['inTax', 'facility_tax'], ['inScc', 'scc'], ['inInd', 'industry'], ['inAdv', 'adv_industry'], ['inReact', 'reactions'],
-    ['inCme', 'comp_me'], ['inCte', 'comp_te'], ['inMarket', 'market'], ['inBuy', 'buy_mode'], ['inSell', 'sell_mode'], ['inSalesTax', 'sales_tax'], ['inBroker', 'broker']];
+    ['inCme', 'comp_me'], ['inCte', 'comp_te'], ['inMarket', 'market'], ['inBuy', 'buy_mode'], ['inSell', 'sell_mode'], ['inSalesTax', 'sales_tax'], ['inBroker', 'broker'], ['inSci', 'inv_sci'], ['inEnc', 'inv_enc']];
   var I = { inited: false, res: null, build: [], t: null, view: 'scan', week: null };
-  try { I.view = localStorage.getItem('elw.industry.view') === 'calc' ? 'calc' : 'scan'; } catch (e) { }
+  try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'calc' || v0 === 'plan' ? v0 : 'scan'; } catch (e) { }
   function showView() {
-    $('inScanView').hidden = I.view !== 'scan'; $('inCalcView').hidden = I.view !== 'calc';
-    $('inViewScan').classList.toggle('on', I.view === 'scan'); $('inViewCalc').classList.toggle('on', I.view === 'calc');
-    $('inViewScan').setAttribute('aria-selected', I.view === 'scan'); $('inViewCalc').setAttribute('aria-selected', I.view === 'calc');
+    [['scan', 'inScanView', 'inViewScan'], ['calc', 'inCalcView', 'inViewCalc'], ['plan', 'inPlanView', 'inViewPlan']].forEach(function (v) {
+      $(v[1]).hidden = I.view !== v[0];
+      $(v[2]).classList.toggle('on', I.view === v[0]);
+      $(v[2]).setAttribute('aria-selected', I.view === v[0]);
+    });
   }
   function setView(v) {
     I.view = v;
     try { localStorage.setItem('elw.industry.view', v); } catch (e) { }
     showView();
     if (v === 'scan' && window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(true);
+    if (v === 'plan' && window.ELW_INDUSTRY && ELW_INDUSTRY.plan) ELW_INDUSTRY.plan.render();
     window.scrollTo(0, 0);
   }
   // для сканера (scan.js): открыть предмет в калькуляторе, общие настройки и подсказки
@@ -194,6 +209,7 @@
   $('inGo').addEventListener('click', function () { calc(); });
   $('inViewScan').addEventListener('click', function () { setView('scan'); });
   $('inViewCalc').addEventListener('click', function () { setView('calc'); });
+  $('inViewPlan').addEventListener('click', function () { setView('plan'); });
 
   function calc() {
     var msg = $('inMsg'), btn = $('inGo');
