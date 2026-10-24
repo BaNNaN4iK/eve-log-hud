@@ -150,6 +150,21 @@
     if (v === 'plan' && window.ELW_INDUSTRY && ELW_INDUSTRY.plan) ELW_INDUSTRY.plan.render();
     window.scrollTo(0, 0);
   }
+  // сворачиваемые разделы: что свёрнуто — запоминается (общий помощник для калькулятора, сканера и плана)
+  var FOLD = {};
+  try { FOLD = JSON.parse(localStorage.getItem('elw.industry.folded') || '{}') || {}; } catch (e) { FOLD = {}; }
+  function fold(key, title, body, open) {
+    if (!body) return '';
+    var closed = Object.prototype.hasOwnProperty.call(FOLD, key) ? FOLD[key] : open === false;
+    return '<details class="in-sec" data-fold="' + esc(key) + '"' + (closed ? '' : ' open') + '><summary>' + title + '</summary>' + body + '</details>';
+  }
+  document.addEventListener('click', function (e) {
+    var sm = e.target.closest && e.target.closest('details[data-fold] > summary');
+    if (!sm || (e.target.closest('.in-help') && e.target.closest('.in-help') !== null)) return;
+    FOLD[sm.parentNode.getAttribute('data-fold')] = sm.parentNode.open;          // открыт → после нажатия свернётся
+    try { localStorage.setItem('elw.industry.folded', JSON.stringify(FOLD)); } catch (err) { }
+  }, true);
+
   // для сканера (scan.js): открыть предмет в калькуляторе, общие настройки и подсказки
   window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
   ELW_INDUSTRY.open = function (name, src, me, te) {
@@ -161,6 +176,7 @@
   ELW_INDUSTRY.settings = function () { return settings(); };
   ELW_INDUSTRY.help = function (key) { return help(key); };
   ELW_INDUSTRY.ico = function (t) { return ico(t); };
+  ELW_INDUSTRY.fold = fold;
 
   function settings() {
     var s = { build: I.build };
@@ -266,7 +282,7 @@
         row('Прибыль', '<span class="' + (c.profit > 0 ? 'in-good' : c.profit < 0 ? 'in-bad' : '') + '">' + isk(c.profit) + '</span>', 'tot') +
         row('ISK в час', isk(c.isk_hour)) + row('Маржа', c.margin === null || c.margin === undefined ? '—' : String(c.margin).replace('.', ',') + '%') + '</dl></div>';
     };
-    h += '<div class="in-cmp">' + col('Продажа своим ордером', cs, 'var(--good)', 'sell') + col('Мгновенная продажа', cb, 'var(--accent)', 'buy') + '</div>';
+    h += fold('c_cmp', 'Продажа: своим ордером и мгновенно', '<div class="in-cmp" style="margin-top:4px">' + col('Продажа своим ордером', cs, 'var(--good)', 'sell') + col('Мгновенная продажа', cb, 'var(--accent)', 'buy') + '</div>');
     h += '<div class="tiles" style="margin-top:12px">' +
       tile('Себестоимость', isk(t.cost), 'за штуку ' + isk(t.per_unit) + ' ISK', '', 't_cost') +
       tile('Материалы', isk(t.materials), 'работы ' + isk(t.jobs) + ' ISK', '', 't_mat') +
@@ -279,8 +295,8 @@
     // материалы (дерево)
     var rows = matRows(r.tree, 0, []);
     var canBuild = rows.some(function (x) { return x.m.buildable; });
-    h += '<h3 class="small muted" style="margin:16px 0 6px">Материалы — ' + (canBuild ? 'отметьте, что строите сами, а не покупаете' :
-      'всё покупается: построить по чертежу здесь ничего нельзя (минералы и другое сырьё добывают)') + '</h3>' +
+    h += fold('c_mats', 'Материалы <span class="n">(' + rows.length + ') — ' + (canBuild ? 'отметьте, что строите сами, а не покупаете' :
+      'всё покупается: построить по чертежу здесь ничего нельзя (минералы и другое сырьё добывают)') + '</span>',
       table('inMats', rows.map(function (x) {
         var m = x.m, price = up[String(m.type_id)];
         return { name: m.name, qty: m.qty, depth: x.depth, runs: x.runs, m: m, price: price, total: price !== null && price !== undefined ? price * m.qty : null };
@@ -299,20 +315,20 @@
             (x.m.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') :
             '<span class="in-sub" title="Для этого материала нет чертежа: его добывают, получают переработкой, на планетах или с NPC">не строится</span>';
         } }
-      ], { rowAttrs: function (x) { return x.m.build ? ' class="in-built"' : ''; } });
+      ], { rowAttrs: function (x) { return x.m.build ? ' class="in-built"' : ''; } }));
 
     // работы
-    h += '<h3 class="small muted" style="margin:16px 0 6px">Работы</h3>' + table('inJobs', r.jobs, [
+    h += fold('c_jobs', 'Работы <span class="n">(' + r.jobs.length + ')</span>', table('inJobs', r.jobs, [
       { k: 'name', t: 'Что', l: 1, f: function (j) { return '<span style="padding-left:' + (j.depth * 22) + 'px">' + ico(j.type_id) + esc(j.name) + '</span>' + (j.kind === 'r' ? ' <span class="in-sub">реакция</span>' : ''); } },
       { k: 'runs', t: 'Прогонов', f: function (j) { return esc(L.fmtInt(j.runs)); } },
       { k: 'out', t: 'Выйдет', f: function (j) { return esc(L.fmtInt(j.out)); } },
       { k: 'time', t: 'Время', f: function (j) { return esc(dur(j.time)); } },
       { k: 'eiv', t: 'EIV', title: HELP.c_eiv, f: function (j) { return esc(isk(j.eiv)); } },
       { k: 'cost', t: 'Стоимость работы', title: HELP.c_cost, f: function (j) { return esc(isk(j.cost)); } }
-    ], {});
+    ], {}));
 
     // закупка
-    h += '<h3 class="small muted" style="margin:16px 0 6px">Что купить</h3>' + table('inBuyList', r.shopping, [
+    h += fold('c_buy', 'Что купить <span class="n">(' + r.shopping.length + ' поз. · ' + isk(t.materials) + ' ISK)</span>', table('inBuyList', r.shopping, [
       { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + esc(x.name); } },
       { k: 'qty', t: 'Количество', f: function (x) { return esc(L.fmtInt(x.qty)); } },
       { k: 'price', t: 'Цена', f: function (x) { return esc(isk(x.price)); } },
@@ -320,7 +336,7 @@
       { k: 'volume', t: 'Объём, м³', f: function (x) { return esc(L.fmtInt(x.volume)); } }
     ], { sort: { k: 'total', d: -1 } }) +
       '<div class="controls" style="margin-top:8px"><button type="button" class="btn" id="inCopy">Скопировать список покупок</button>' +
-      '<span class="small muted" id="inCopyMsg" role="status"></span></div>';
+      '<span class="small muted" id="inCopyMsg" role="status"></span></div>');
     box.innerHTML = h + '</section>';
   }
 

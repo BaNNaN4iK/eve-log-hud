@@ -35,13 +35,13 @@
       '<p class="small muted" style="margin-top:0">Считается один прогон каждого чертежа с вашими настройками (ME, TE, сооружение, налоги — на экране «Калькулятор») ' +
       'по ценам хаба. Стоимость работы — по индексу системы хаба. Нажмите на карточку — откроется подробный расчёт.</p>' +
       '<div class="in-chips" id="scHubs"></div><div id="scStatus" class="small" style="margin-top:8px"></div>' +
-      '<div class="in-chips" style="margin-top:12px"><span class="small muted">Сортировка</span><span id="scSorts" class="in-chips"></span>' +
+      ELW_INDUSTRY.fold('sc_filters', 'Сортировка, категории и фильтры', '<div class="in-chips" style="margin-top:6px"><span class="small muted">Сортировка</span><span id="scSorts" class="in-chips"></span>' +
       '<span class="small muted" style="margin-left:10px">Продаю</span><span id="scModes" class="in-chips"></span></div>' +
       '<div class="in-chips" id="scCats" style="margin-top:8px"></div>' +
       '<div class="in-chips" style="margin-top:10px"><input id="scQ" type="search" placeholder="Поиск предмета…" aria-label="Поиск предмета" spellcheck="false" ' +
       'style="flex:1 1 260px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px">' +
       '<label class="small"><input type="checkbox" id="scSure"> только надёжные' + ELW_INDUSTRY.help('sc_sure') + '</label></div>' +
-      '<div id="scFilters" class="small muted" style="margin-top:8px"></div><div id="scSettings" class="small muted" style="margin-top:4px"></div></section>' +
+      '<div id="scFilters" class="small muted" style="margin-top:8px"></div>') + '<div id="scSettings" class="small muted" style="margin-top:8px"></div></section>' +
       '<div id="scList"></div>';
     $('scQ').value = SC.q; $('scSure').checked = SC.sure;
     var t = null;

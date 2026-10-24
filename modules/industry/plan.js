@@ -38,7 +38,7 @@
       '<button type="button" class="btn primary" id="plGo" style="margin-left:auto">Посчитать план</button></div>' +
       '<div class="small" id="plMsg" role="status" aria-live="polite" style="margin-top:6px"></div></section>' +
       '<section class="panel"><h2>Что строим <span class="muted small" id="plCount"></span></h2><div id="plItems"></div>' +
-      '<details class="in-set" id="plAdd" open><summary>Добавить продукт</summary>' +
+      '<details class="in-sec" id="plAdd" data-fold="pl_add"' + (ELW_INDUSTRY.fold('pl_add', 'x', 'x', true).indexOf(' open') > 0 ? ' open' : '') + '><summary>Добавить продукт</summary>' +
       '<div class="in-chips" style="margin-top:8px"><input id="plQ" type="search" placeholder="Название предмета…" aria-label="Поиск чертежа" spellcheck="false" ' +
       'style="flex:1 1 260px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px"></div>' +
       '<div class="in-chips" id="plCats" style="margin-top:8px"></div><div class="in-chips" id="plTech" style="margin-top:6px"></div>' +
@@ -114,7 +114,7 @@
     if (!P.items.length) { $('plItems').innerHTML = '<p class="small muted">Пока пусто. Найдите продукт ниже и нажмите «+».</p>'; return; }
     var res = {};
     ((P.res && P.res.products) || []).forEach(function (p) { res[p.type_id] = p; });
-    $('plItems').innerHTML = table('plProd', P.items.map(function (i) {
+    $('plItems').innerHTML = sec('items', 'Продукты <span class="n">(' + P.items.length + ')</span>', table('plProd', P.items.map(function (i) {
       var p = res[i.id] || {}, inf = info(i.id), w = P.week[i.id];
       return { id: i.id, qty: i.qty, name: inf.name, src: inf.src, kind: inf.kind, p: p, w: w,
                profit: p.profit, margin: p.margin, roi: p.roi };
@@ -130,7 +130,7 @@
       { k: 'roi', t: 'ROI', title: 'Прибыль к вложенному', f: function (r) { return esc(pct(r.roi)); } },
       { k: '', t: 'Спрос, неделя', f: function (r) { return r.w ? esc(L.fmtInt(r.w.week)) + '<div class="in-sub">вчера ' + esc(L.fmtInt(r.w.last)) + '</div>' : '<span class="muted">…</span>'; } },
       { k: '', t: '', f: function (r) { return '<button type="button" class="btn" data-del="' + r.id + '" aria-label="Убрать ' + esc(r.name) + '">×</button>'; } }
-    ], { rowAttrs: function (r) { return r.profit > 0 ? ' class="in-rgood"' : r.profit < 0 ? ' class="in-rbad"' : ''; } });
+    ], { rowAttrs: function (r) { return r.profit > 0 ? ' class="in-rgood"' : r.profit < 0 ? ' class="in-rbad"' : ''; } }), true);
   }
   function drawFound() {
     $('plCats').innerHTML = CATS.map(function (c) { return chip('cat', c[0], c[1], c[0] === P.cat); }).join('');
@@ -172,14 +172,14 @@
     }, function () { P.busy = false; $('plMsg').textContent = 'Нет связи с трекером.'; });
   }
 
-  function sec(key, title, body, open) { return '<details class="in-sec" data-sec="pl' + key + '"' + (open ? ' open' : '') + '><summary>' + title + '</summary>' + body + '</details>'; }
+  function sec(key, title, body, open) { return ELW_INDUSTRY.fold('pl_' + key, title, body, open); }
   function drawResult() {
     var r = P.res, box = $('plResult');
     if (!r) { box.innerHTML = ''; return; }
     var t = r.totals;
     var line = function (k, v, c, note) { return '<dt' + (c ? ' class="' + c + '"' : '') + '>' + k + (note ? '<div class="in-sub">' + note + '</div>' : '') + '</dt><dd' + (c ? ' class="' + c + '"' : '') + '>' + v + '</dd>'; };
-    var h = '<section class="panel"><h2>Итог плана <span class="muted small">' + (r.mode === 'full' ? 'полный цикл' : 'компоненты покупаются') + ' · ' + esc(r.market_name) + '</span></h2>' +
-      '<div class="tiles">' +
+    var h = '<section class="panel"><h2>Итог плана <span class="muted small">' + (r.mode === 'full' ? 'полный цикл' : 'компоненты покупаются') + ' · ' + esc(r.market_name) + '</span></h2>';
+    var sum = '<div class="tiles">' +
       '<div class="tile"><div class="k">Прибыль</div><div class="v ' + cls(t.profit) + '">' + esc(isk(t.profit)) + '</div><div class="s">ROI ' + esc(pct(t.roi)) + '</div></div>' +
       '<div class="tile"><div class="k">Себестоимость</div><div class="v">' + esc(isk(t.cost)) + '</div><div class="s">с учётом остатков</div></div>' +
       '<div class="tile"><div class="k">Выручка</div><div class="v">' + esc(isk(t.revenue)) + '</div><div class="s">после налогов</div></div>' +
@@ -193,6 +193,7 @@
       '<div style="--c:var(--good)"><h3>Что получаем</h3><dl>' +
       line('Выручка за продукты', isk(t.revenue), '', 'по выбранной цене, минус налог и брокер') + line('Себестоимость', t.cost === null ? '—' : '−' + isk(t.cost)) +
       line('Прибыль', '<span class="' + cls(t.profit) + '">' + isk(t.profit) + '</span>', 'tot') + line('ROI', pct(t.roi)) + '</dl></div></div>';
+    h += sec('sum', 'Итог: прибыль <span class="n">' + isk(t.profit) + ' ISK · ROI ' + pct(t.roi) + '</span>', sum, true);
     if (r.no_price && r.no_price.length) h += '<p class="small" style="color:var(--warn)">Нет цены на рынке: ' + esc(r.no_price.join(', ')) + '</p>';
 
     // работы
@@ -209,21 +210,21 @@
     };
     var jm = jobs('m'), jr = jobs('r');
     h += sec('jobs', 'Работы <span class="n">— производство ' + jm.length + (jr.length ? ', реакции ' + jr.length : '') + ' · запуск ' + isk(t.jobs) + ' ISK</span>',
-      (jm.length ? '<h3 class="small muted" style="margin:6px 0">Производство</h3>' + jobTable(jm, 'plJobsM') : '') +
-      (jr.length ? '<h3 class="small muted" style="margin:12px 0 6px">Реакции</h3>' + jobTable(jr, 'plJobsR') : ''), false);
+      (jm.length ? sec('jobs_m', 'Производство <span class="n">(' + jm.length + ')</span>', jobTable(jm, 'plJobsM')) : '') +
+      (jr.length ? sec('jobs_r', 'Реакции <span class="n">(' + jr.length + ')</span>', jobTable(jr, 'plJobsR')) : ''), false);
 
     // закупка по группам
     var groups = {}, order = [];
     r.shopping.forEach(function (x) { if (!groups[x.group]) { groups[x.group] = []; order.push(x.group); } groups[x.group].push(x); });
     var shop = order.map(function (g) {
       var sum = groups[g].reduce(function (a, x) { return a + (x.total || 0); }, 0);
-      return '<h3 class="small muted" style="margin:10px 0 4px">' + esc(g) + ' · ' + isk(sum) + ' ISK</h3>' + table('plBuy' + order.indexOf(g), groups[g], [
+      return sec('buy_' + g, esc(g) + ' <span class="n">(' + groups[g].length + ' · ' + isk(sum) + ' ISK)</span>', table('plBuy' + order.indexOf(g), groups[g], [
         { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + esc(x.name); } },
         { k: 'qty', t: 'Количество', f: function (x) { return esc(L.fmtInt(x.qty)); } },
         { k: 'price', t: 'Цена', f: function (x) { return esc(isk(x.price)); } },
         { k: 'total', t: 'Сумма', f: function (x) { return esc(isk(x.total)); } },
         { k: 'volume', t: 'м³', f: function (x) { return esc(L.fmtInt(x.volume)); } }
-      ], { sort: { k: 'total', d: -1 } });
+      ], { sort: { k: 'total', d: -1 } }));
     }).join('') + '<div class="controls" style="margin-top:8px"><button type="button" class="btn" id="plCopy">Скопировать список покупок</button><span class="small muted" id="plCopyMsg" role="status"></span></div>';
     h += sec('buy', 'Закупка <span class="n">— ' + r.shopping.length + ' позиций · ' + isk((t.buy || 0) + (r.invention.reduce(function (a, x) { return a + (x.datacores_cost || 0); }, 0))) + ' ISK</span>', shop, true);
 
