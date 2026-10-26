@@ -145,7 +145,7 @@
     var box = $('inProjView');
     if (!box || Q.built) return;
     Q.built = true;
-    box.innerHTML = '<div id="pjList"></div><section class="panel" id="pjDefaults" hidden>' +
+    box.innerHTML = '<div id="pjList"></div><section class="panel" id="pjDefaults" style="margin-top:14px" hidden>' +
       ELW_INDUSTRY.fold('p_defaults', 'Настройки по умолчанию <span class="n">— для новых расчётов, сканера и плана: где строим, навыки, рынок</span>',
         ELW_INDUSTRY.form('dfS', { runs: false }) + '<div class="controls" style="margin-top:8px"><button type="button" class="btn primary" id="dfSave">Сохранить</button>' +
         '<span class="small" id="dfMsg" role="status" aria-live="polite"></span></div>', false) + '</section><div id="pjDetail"></div>';
@@ -196,11 +196,11 @@
       'Настройки — «по умолчанию» (ниже), в проекте их можно поменять. План из нескольких продуктов закрепляется на экране «План производства».</div>' +
       '<div class="small" id="pjMsg" role="status" aria-live="polite" style="margin-top:6px"></div></section>';
     if (!rows.length) {
-      h += '<section class="panel"><p class="muted">' + (Q.list ? 'Закреплённых чертежей пока нет. Рассчитайте предмет и закрепите его — и здесь будет видно, сколько материалов уже собрано, сколько осталось докупить и на сколько ISK, когда будет готово и сколько принесёт.' : 'Загружаю…') + '</p></section>';
+      h += '<section class="panel" style="margin-top:14px"><p class="muted">' + (Q.list ? 'Закреплённых чертежей пока нет. Рассчитайте предмет и закрепите его — и здесь будет видно, сколько материалов уже собрано, сколько осталось докупить и на сколько ISK, когда будет готово и сколько принесёт.' : 'Загружаю…') + '</p></section>';
     } else {
       var sum = { left: 0, profit: 0, building: 0 };
       rows.forEach(function (r) { sum.left += r.status === 'collect' && r.left_cost ? r.left_cost : 0; sum.profit += r.status !== 'done' && r.profit ? r.profit : 0; sum.building += r.status === 'building' ? 1 : 0; });
-      h += '<div class="tiles">' + ELW.tile('Проектов', L.fmtInt(rows.length), sum.building ? 'строится ' + sum.building : '') +
+      h += '<div class="tiles" style="margin:14px 0 4px">' + ELW.tile('Проектов', L.fmtInt(rows.length), sum.building ? 'строится ' + sum.building : '') +
         ELW.tile('Докупить всего', isk(sum.left), 'по проектам на сборе материалов') +
         ELW.tile('Ожидаемая прибыль', isk(sum.profit), 'по незавершённым') + '</div>';
       h += '<div class="pj-cards">' + rows.map(function (r) {
