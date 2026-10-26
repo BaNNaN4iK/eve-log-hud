@@ -937,6 +937,26 @@ class History:
 # ---------------------------------------------------------------------------
 
 PROJECT_STATUSES = ("collect", "building", "done")
+# вид материала по группе игры: (семейство для цвета и фильтра, подпись)
+MAT_KINDS = {18: ("mineral", "минерал"), 423: ("ice", "лёд"), 427: ("moon", "лунный материал"), 428: ("reaction", "реакция · промежуточный"),
+             429: ("reaction", "реакция · композит"), 974: ("reaction", "реакция · полимер"), 4096: ("reaction", "реакция · молекулярная ковка"),
+             711: ("gas", "газ"), 712: ("gas", "биохимия · бустеры"), 1042: ("pi", "планетарка P1"), 1034: ("pi", "планетарка P2"),
+             1040: ("pi", "планетарка P3"), 1041: ("pi", "планетарка P4"), 333: ("datacore", "датакор"), 1136: ("fuel", "топливный блок"),
+             334: ("component", "компонент T2"), 873: ("component", "капитальный компонент"), 913: ("component", "капитальный компонент T2"),
+             964: ("component", "компонент T3"), 536: ("component", "компонент структур"), 526: ("commodity", "товар")}
+MAT_CATS = {42: ("pi", "планетарка P0"), 43: ("pi", "планетарка"), 6: ("ship", "корабль"), 7: ("module", "модуль"), 8: ("charge", "заряд"),
+            18: ("drone", "дрон"), 87: ("drone", "истребитель"), 25: ("ore", "руда"), 4: ("material", "материал")}
+
+
+FAM_NAMES = {"mineral": "Минералы — базовые руды", "reaction": "Реакции", "moon": "Лунные материалы", "pi": "Планетарка (PI)", "ice": "Лёд",
+             "gas": "Газы", "datacore": "Датакоры", "fuel": "Топливные блоки", "component": "Компоненты", "commodity": "Товары"}
+
+
+def mat_kind(data: dict, tid: int) -> Tuple[str, str]:
+    """Семейство и подпись материала: минерал, реакция, планетарка, лёд, газ, компонент…"""
+    t = data["types"].get(str(tid)) or [0, 0, 0]
+    k = MAT_KINDS.get(t[1]) or MAT_CATS.get(t[2])
+    return k if k else ("other", (data.get("groups") or {}).get(str(t[1])) or "прочее")
 MINERAL_GROUP = 18
 PROJECT_MAX = 50
 PROJECT_SNAP = 3600                    # снимок себестоимости и цены продукта для графика — не чаще раза в час
@@ -1232,7 +1252,9 @@ class Projects:
                 build |= {int(k) for k in bp}                       # план «полный цикл» — и реакции
 
         def mat(m):
-            node = {"t": m["type_id"], "n": m["name"], "q": m["qty"], "k": m.get("kind", ""), "b": m["buildable"], "built": "build" in m, "c": []}
+            f, fl = mat_kind(self.calc.data, m["type_id"])
+            node = {"t": m["type_id"], "n": m["name"], "q": m["qty"], "k": m.get("kind", ""), "b": m["buildable"], "built": "build" in m,
+                    "f": f, "fl": fl, "c": []}
             if "build" in m:
                 node["runs"], node["out"] = m["build"]["runs"], m["build"]["out"]
                 node["c"] = [mat(x) for x in m["build"]["materials"]]
@@ -1242,7 +1264,8 @@ class Projects:
             if str(tid) not in bp:
                 continue
             root = self.calc.plan(tid, units, s, build)
-            out.append({"t": tid, "n": root["name"], "q": units, "k": root["kind"], "b": True, "built": True, "top": True,
+            f, fl = mat_kind(self.calc.data, tid)
+            out.append({"t": tid, "n": root["name"], "q": units, "k": root["kind"], "b": True, "built": True, "top": True, "f": f, "fl": fl,
                         "runs": root["runs"], "out": root["out"], "c": [mat(x) for x in root["materials"]]})
         return out
 
@@ -1254,7 +1277,8 @@ class Projects:
             left = r["qty"] - use
             price = r["price"]
             vol1 = r["volume"] / r["qty"] if r["qty"] else 0
-            rows.append(dict(r, have=h, left=left, extra=max(0, h - r["qty"]), pct=round(100 * use / r["qty"], 1) if r["qty"] else 100.0,
+            fam, fam_label = mat_kind(self.calc.data, r["type_id"])
+            rows.append(dict(r, fam=fam, fam_label=fam_label, have=h, left=left, extra=max(0, h - r["qty"]), pct=round(100 * use / r["qty"], 1) if r["qty"] else 100.0,
                              have_cost=use * price if price is not None else None, left_cost=left * price if price is not None else None,
                              left_volume=left * vol1))
             if price is not None:
@@ -1268,6 +1292,19 @@ class Projects:
         return rows, {"need_cost": need_cost, "have_cost": have_cost, "left_cost": left_cost, "left_volume": left_vol,
                       "progress": progress, "ready": ready, "positions": len(rows),
                       "progress_qty": round(100 * sum(min(r["have"], r["qty"]) for r in rows) / qty, 1)}
+
+    def _families(self, rows: list, have: dict, priced: bool) -> list:
+        """Готовность по видам сырья (минералы, реакции, планетарка…), самые дорогие — первыми."""
+        groups: Dict[str, list] = {}
+        for r in rows:
+            groups.setdefault(r["fam"], []).append(r)
+        out = []
+        for fam, rs in groups.items():
+            _, t = self._rows([{k: r[k] for k in ("type_id", "name", "qty", "price", "total", "volume")} for r in rs], have)
+            out.append({"fam": fam, "label": FAM_NAMES.get(fam, rs[0]["fam_label"]), "progress": t["progress"] if priced else t["progress_qty"],
+                        "ready": t["ready"], "positions": t["positions"], "need_cost": t["need_cost"], "left_cost": t["left_cost"] if priced else None})
+        out.sort(key=lambda f: -(f["need_cost"] or 0))
+        return out
 
     def detail(self, p: dict, now: Optional[float] = None, snap: bool = True, with_raw: bool = True) -> dict:
         """Расчёт проекта: материалы (нужно / есть / осталось / докупить), работы, итоги, время."""
@@ -1293,7 +1330,8 @@ class Projects:
                                                          left_cost=rt["left_cost"] if priced else None,
                                                          jobs=rr["totals"]["jobs"], cost=rr["totals"]["cost"],
                                                          per_unit=rr["totals"]["per_unit"], time=rr["totals"]["time"],
-                                                         minerals=dict(mt2, progress=mt2["progress"] if priced else mt2["progress_qty"]) if mins else None),
+                                                         minerals=dict(mt2, progress=mt2["progress"] if priced else mt2["progress_qty"]) if mins else None,
+                                                         families=self._families(rows, have, priced)),
                        "jobs": len(rr["jobs"])}
         done = set(p.get("jobs_done") or [])
         jobs = [dict(j, done=j["key"] in done) for j in e["jobs"]]
@@ -1684,7 +1722,7 @@ def setup(ctx) -> None:
 
     def icons(ids):
         if ctx.online is not None and ids:
-            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in list(ids)[:120]], name="industry-icons", daemon=True).start()
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in list(dict.fromkeys(ids))[:300]], name="industry-icons", daemon=True).start()
 
     def projects_list(qs):
         rows = [projects.summary(p) for p in list(projects.items) if not p.get("draft")]
@@ -1708,7 +1746,8 @@ def setup(ctx) -> None:
                 tid = p["type_id"]
             d["series_tid"] = tid
             d["series"] = projects.price_series(market, tid) if (qs.get("series") or ["1"])[0] == "1" else None
-            icons([p["type_id"]] + [m["type_id"] for m in d["materials"]] + [j["type_id"] for j in d["jobs"]])
+            raw_ids = [m["type_id"] for m in (d.get("raw") or {}).get("materials") or []]
+            icons([p["type_id"]] + [m["type_id"] for m in d["materials"]] + raw_ids + [j["type_id"] for j in d["jobs"]])
         return d
 
     def projects_post(body, qs=None):
@@ -1776,7 +1815,17 @@ def setup(ctx) -> None:
         if p is None:
             return {"ok": False, "message": "Такого проекта нет."}
         try:
-            return {"ok": True, "tree": projects.tree(p, (qs.get("full") or ["0"])[0] == "1")}
+            tree = projects.tree(p, (qs.get("full") or ["0"])[0] == "1")
+            ids = set()
+
+            def walk(n):
+                ids.add(n["t"])
+                for c in n["c"]:
+                    walk(c)
+            for r in tree:
+                walk(r)
+            icons(sorted(ids))
+            return {"ok": True, "tree": tree}
         except Exception as e:
             ctx.log.warning("Производство: дерево не построено: %s", e)
             return {"ok": False, "message": f"Не удалось построить дерево: {e}"}

@@ -111,9 +111,15 @@
       '.pj-bars{display:flex;align-items:flex-end;gap:3px;height:70px;margin:4px 0 10px}.pj-bars>div{flex:1;height:100%;display:flex;align-items:flex-end}.pj-bars span{display:block;width:100%;border-radius:3px 3px 0 0}' +
       '.pj-log{list-style:none;padding:0;margin:0;font-size:12.5px;max-height:240px;overflow:auto}.pj-log li{padding:2px 0}' +
       '.pj-draft{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px;margin:8px 0;border-radius:10px;background:color-mix(in srgb,var(--warn) 14%,var(--panel2));border:1px dashed var(--warn)}' +
+      '.in-fam{display:inline-block;font-size:10.5px;line-height:1.5;border-radius:5px;padding:0 6px;white-space:nowrap;border:1px solid currentColor;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:1px}' +
+      '.in-fam.f-mineral{color:#9fb3c8}.in-fam.f-reaction{color:#b48cf0}.in-fam.f-moon{color:#3cc8b4}.in-fam.f-pi{color:#6fcf5f}.in-fam.f-ice{color:#7fd4ff}' +
+      '.in-fam.f-gas{color:#f0a050}.in-fam.f-datacore{color:#e8c840}.in-fam.f-fuel{color:#e07a5f}.in-fam.f-component{color:var(--accent)}.in-fam.f-commodity{color:#c8a27a}' +
       '.in-cp{cursor:copy;border-bottom:1px dashed transparent;transition:color .15s}.in-cp:hover,.in-cp:focus{border-bottom-color:var(--muted);outline:none}.in-cp.in-copied{color:var(--good);border-bottom-color:var(--good)}' +
       '.in-cp.in-copied::after{content:" \\2713  скопировано";font-size:11px}' +
       '.pj-rawbar{background:var(--panel2);border-radius:10px;padding:10px 12px;margin:4px 0 10px;display:flex;flex-direction:column;gap:6px}' +
+      '.pj-fam{display:grid;grid-template-columns:minmax(150px,210px) 1fr;gap:10px;align-items:center}.pj-fam-n .in-fam{font-size:11.5px}' +
+      '.pj-prog.big.f-mineral>div{background:linear-gradient(90deg,#6c7a89,#aab7c4)}.pj-prog.big.f-reaction>div{background:linear-gradient(90deg,#6a4fb0,#b48cf0)}' +
+      '.pj-prog.big.f-pi>div{background:linear-gradient(90deg,#3b8a32,#6fcf5f)}.pj-prog.big.f-moon>div{background:linear-gradient(90deg,#1f8a7c,#3cc8b4)}.pj-prog.big.f-gas>div{background:linear-gradient(90deg,#a8622a,#f0a050)}' +
       '.pj-prog.big.min>div{background:linear-gradient(90deg,#6c7a89,#aab7c4)}.pj-prog.big{height:22px;border-radius:7px;position:relative}.pj-prog.big>span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:var(--text);text-shadow:0 1px 2px rgba(0,0,0,.6)}' +
       '.pj-hbars{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:6px 18px;margin:4px 0 10px}.pj-hb{display:grid;grid-template-columns:minmax(120px,1.2fr) 2fr auto;gap:8px;align-items:center;font-size:12.5px}' +
       '.pj-hb .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pj-hb .tr{height:10px;background:var(--panel);border-radius:5px;overflow:hidden}.pj-hb .tr>div{height:100%;border-radius:5px}.pj-hb .vl{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}',
@@ -121,14 +127,16 @@
       '<button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button>' +
       '<button type="button" class="in-chip" id="inViewProj" role="tab">📌 Ведение производства</button></div>' +
       '<div id="inScanView"></div><div id="inPlanView"></div><div id="inProjView"></div>',
-    render: function () {
-      init();
-      showView();
-      var X = window.ELW_INDUSTRY || {};
-      if (I.view === 'scan') { if (X.scanner) X.scanner.render(); return; }
-      if (I.view === 'plan') { if (X.plan) X.plan.render(); return; }
-      if (X.projects) X.projects.render();
-    } });
+    render: function () { if (I && I.ready) renderTab(); } });   // ядро может позвать сразу из addTab — модуль ещё не готов
+
+  function renderTab() {
+    init();
+    showView();
+    var X = window.ELW_INDUSTRY || {};
+    if (I.view === 'scan') { if (X.scanner) X.scanner.render(); return; }
+    if (I.view === 'plan') { if (X.plan) X.plan.render(); return; }
+    if (X.projects) X.projects.render();
+  }
 
   var I = { inited: false, view: 'scan', defaults: null, waiting: [] };
   try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'plan' ? 'plan' : v0 === 'proj' || v0 === 'calc' ? 'proj' : 'scan'; } catch (e) { }
@@ -209,6 +217,11 @@
   X.help = function (key) { return help(key); };
   X.ico = function (t) { return ico(t); };
   X.form = form; X.readForm = readForm; X.fillForm = fillForm;
+  // вид материала: минерал, реакция, планетарка, лёд, газ, компонент… — цветная метка и общее название для фильтра
+  var FAMS = { mineral: 'минералы', reaction: 'реакции', moon: 'лунные материалы', pi: 'планетарка', ice: 'лёд', gas: 'газы', datacore: 'датакоры',
+    fuel: 'топливо', component: 'компоненты', commodity: 'товары', ship: 'корабли', module: 'модули', charge: 'заряды', drone: 'дроны', ore: 'руда', material: 'материалы', other: 'прочее' };
+  X.famName = function (f, label) { return FAMS[f] || label || f; };
+  X.fam = function (f, label) { return f ? '<span class="in-fam f-' + esc(f) + '" title="' + esc(label || '') + '">' + esc(label || X.famName(f)) + '</span>' : ''; };
   // настройки по умолчанию (для новых расчётов, сканера и плана): что сохранено на сервере
   X.settings = function () { var s = {}; Object.keys(I.defaults || {}).forEach(function (k) { s[k] = I.defaults[k]; }); return s; };
   X.defaults = function (fn) { if (I.defaults) fn(X.settings()); else I.waiting.push(fn); };
@@ -277,4 +290,8 @@
   }
   document.addEventListener('mouseover', placeTip);
   document.addEventListener('focusin', placeTip);
+
+  // всё готово; сканер, план и ведение подключаются следующими файлами — отрисовать, когда они загрузятся
+  I.ready = true;
+  setTimeout(function () { if ($('inViewScan') && $('inViewScan').offsetParent) renderTab(); }, 0);
 })(window.ELW);

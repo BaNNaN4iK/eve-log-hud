@@ -165,6 +165,10 @@
       if (!j.ok) { Q.open = null; remember(); $('pjDetail').innerHTML = ''; drawList(); flash(j.message); return; }
       if (series === false && Q.d && Q.d.series) j.series = Q.d.series;
       Q.d = j; Q.loaded = Date.now(); drawDetail();
+      setTimeout(function () {                                // иконки сырья догружаются в фоне — показать их
+        var a = document.activeElement, busy = a && $('inProjView').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName);
+        if (Q.d === j && !busy && !Q.dirty && !Q.paste) drawDetail();
+      }, 6000);
     }, function () { flash('Нет связи с трекером.'); });
   }
   function remember() { try { if (Q.open) localStorage.setItem('elw.industry.project', Q.open); else localStorage.removeItem('elw.industry.project'); } catch (e) { } }
@@ -323,18 +327,21 @@
     // материалы (что покупаем по плану) и сырьё (если строить всё самому)
     function matTable(list, fkey) {
       var f = Q[fkey] || 'all';
-      var pass = function (m, x) { return x === 'all' || (x === 'min' ? m.mineral : x === 'left' ? m.left > 0 : m.left === 0); };
+      var pass = function (m, x) { return x === 'all' || (x.indexOf('f:') === 0 ? m.fam === x.slice(2) : x === 'left' ? m.left > 0 : m.left === 0); };
+      var fams = [];
+      list.forEach(function (m) { if (m.fam && fams.indexOf(m.fam) < 0) fams.push(m.fam); });
       var shown = list.filter(function (m) { return pass(m, f); });
       shown.sort(function (a, b) { return (b.left > 0) - (a.left > 0) || (b.left_cost || 0) - (a.left_cost || 0) || a.name.localeCompare(b.name); });
       return '<div class="controls" style="margin:4px 0 8px">' +
-        ['all', 'min', 'left', 'ready'].filter(function (x) { return x !== 'min' || list.some(function (m) { return m.mineral; }); }).map(function (x) {
+        ['all', 'left', 'ready'].concat(fams.length > 1 ? fams.map(function (x) { return 'f:' + x; }) : []).map(function (x) {
           var n = list.filter(function (m) { return pass(m, x); }).length;
-          return '<button type="button" class="in-chip' + (f === x ? ' on' : '') + '" data-pj-filter="' + fkey + ':' + x + '">' + { all: 'Все', min: 'Минералы', left: 'Не хватает', ready: 'Собрано' }[x] + '<span class="n">' + n + '</span></button>'; }).join('') +
+          var label = x.indexOf('f:') === 0 ? ELW_INDUSTRY.famName(x.slice(2)) : { all: 'Все', left: 'Не хватает', ready: 'Собрано' }[x];
+          return '<button type="button" class="in-chip' + (f === x ? ' on' : '') + '" data-pj-filter="' + fkey + ':' + x + '">' + esc(label) + '<span class="n">' + n + '</span></button>'; }).join('') +
         '<span style="flex:1"></span><button type="button" class="btn" data-pj-copyleft="' + fkey + '"' + (list.some(function (m) { return m.left; }) ? '' : ' disabled') + '>Скопировать, что докупить</button>' +
         '<button type="button" class="btn" data-pj-copynames="' + fkey + '" title="Только названия, по одному в строке">Скопировать названия</button></div>' +
         '<div class="tw"><table class="pj-mats"><thead><tr><th class="l">Материал <span class="in-sub">(нажмите — скопировать)</span></th><th>Нужно</th><th>Есть</th><th>Осталось</th><th class="l" style="min-width:120px">Собрано</th><th>Цена</th><th>Докупить за</th></tr></thead><tbody>' +
         shown.map(function (m) {
-          return '<tr class="' + (m.left ? '' : 'in-rgood') + '"><td class="l">' + ico(m.type_id) + ELW_INDUSTRY.cp(m.name) + '</td><td>' + esc(L.fmtInt(m.qty)) + '</td>' +
+          return '<tr class="' + (m.left ? '' : 'in-rgood') + '"><td class="l">' + ico(m.type_id) + ELW_INDUSTRY.cp(m.name) + ' ' + ELW_INDUSTRY.fam(m.fam, m.fam_label) + '</td><td>' + esc(L.fmtInt(m.qty)) + '</td>' +
             '<td><input class="pj-have" data-pj-have="' + m.type_id + '" value="' + (m.have ? esc(L.fmtInt(m.have)) : '') + '" placeholder="0" inputmode="numeric" aria-label="Есть: ' + esc(m.name) + '"></td>' +
             '<td>' + (m.left ? '<b class="in-bad">' + esc(L.fmtInt(m.left)) + '</b>' : '<span class="in-good">✓</span>') + (m.extra ? '<div class="in-sub">лишних ' + esc(L.fmtInt(m.extra)) + '</div>' : '') + '</td>' +
             '<td class="l"><div class="pj-prog sm"><div style="width:' + Math.min(100, m.pct) + '%"></div></div><span class="in-sub">' + pct(m.pct) + '</span></td>' +
@@ -353,8 +360,10 @@
     if (d.raw) {
       var rt = d.raw.totals;
       h += fold('raw', 'Сырьё <span class="n">— если строить все компоненты самому: собрано ' + pct(rt.progress) + ', докупить ' + isk(rt.left_cost) + ' ISK</span>',
-        '<div class="pj-rawbar">' + (rt.minerals ? '<div class="small muted">Минералы — базовые руды</div><div class="pj-prog big min"><div style="width:' + Math.min(100, rt.minerals.progress) + '%"></div><span>' + pct(rt.minerals.progress) + ' · ' +
-          rt.minerals.ready + ' из ' + rt.minerals.positions + ' · докупить ' + isk(rt.minerals.left_cost) + ' ISK</span></div>' : '') +
+        '<div class="pj-rawbar">' + (rt.families || []).map(function (fm) {
+          return '<div class="pj-fam"><span class="pj-fam-n">' + ELW_INDUSTRY.fam(fm.fam, fm.label) + '</span><div class="pj-prog big f-' + esc(fm.fam) + '"><div style="width:' + Math.min(100, fm.progress) + '%"></div><span>' + pct(fm.progress) + ' · ' +
+            fm.ready + ' из ' + fm.positions + (fm.left_cost ? ' · докупить ' + isk(fm.left_cost) + ' ISK' : '') + '</span></div></div>';
+        }).join('') +
         '<div class="small muted">Всё сырьё</div><div class="pj-prog big"><div style="width:' + Math.min(100, rt.progress) + '%"></div><span>' + pct(rt.progress) + '</span></div>' +
         '<div class="pj-row"><span>собрано позиций <b>' + rt.ready + ' из ' + rt.positions + '</b> · по количеству <b>' + pct(rt.progress_qty) + '</b></span>' +
         '<span>докупить <b>' + isk(rt.left_cost) + '</b> ISK · ' + L.fmtInt(rt.left_volume) + ' м³</span></div>' +
@@ -496,7 +505,7 @@
       return;
     }
     var f = e.target.closest('[data-pj-filter]');
-    if (f) { var fv = f.getAttribute('data-pj-filter').split(':'); Q[fv[0]] = fv[1]; drawDetail(); return; }
+    if (f) { var fv = f.getAttribute('data-pj-filter'), ci = fv.indexOf(':'); Q[fv.slice(0, ci)] = fv.slice(ci + 1); drawDetail(); return; }
     var st = e.target.closest('[data-pj-status]');
     if (st && Q.d) {
       var to = st.getAttribute('data-pj-status');

@@ -393,6 +393,9 @@ class TestProjects(unittest.TestCase):
         d = self.pr.detail(p, now=1000)
         rt = d["raw"]["totals"]
         self.assertEqual((rt["ready"], rt["positions"]), (1, 4))
+        fams = {f["fam"]: f for f in rt["families"]}                     # шкалы по видам сырья
+        self.assertEqual(fams["mineral"]["positions"], 4)
+        self.assertEqual({m["name"]: m["fam_label"] for m in d["raw"]["materials"]}["Tritanium"], "минерал")
         self.assertGreater(rt["progress"], 0)
         self.assertEqual(d["totals"]["progress"], 0)                         # закупка по плану (Hobgoblin I) не тронута
         p2 = self.pr.create("Crystalline Carbonide", {"runs": 1, "structure": "tatara", "security": "null"}, now=1000)
@@ -448,6 +451,7 @@ class TestProjects(unittest.TestCase):
         full = self.pr.tree(p, True)                                         # до минералов: Hobgoblin I раскрыт
         hob = next(c for c in full[0]["c"] if c["n"] == "Hobgoblin I")
         self.assertTrue(hob["built"])
+        self.assertEqual(next(c for c in hob["c"] if c["n"] == "Tritanium")["f"], "mineral")
         self.assertEqual({c["n"] for c in hob["c"]}, {"Tritanium", "Pyerite"})
         plan = self.pr.create("", self.s, "П", now=1000, items=[(2456, 2), (2454, 5)], mode="buy")
         self.assertEqual([r["n"] for r in self.pr.tree(plan, False)], ["Hobgoblin II", "Hobgoblin I"])
