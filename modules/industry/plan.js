@@ -32,12 +32,20 @@
       '<div class="in-chips"><input id="plName" placeholder="Название плана" aria-label="Название плана" maxlength="80" ' +
       'style="flex:1 1 220px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px">' +
       '<select id="plSaved" aria-label="Сохранённые планы" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 8px"><option value="">Сохранённые планы…</option></select>' +
-      '<button type="button" class="btn" id="plSave">Сохранить</button><button type="button" class="btn" id="plDel" title="Удалить сохранённый план с этим названием">Удалить</button></div>' +
+      '<button type="button" class="btn" id="plSave">Сохранить</button><button type="button" class="btn" id="plDel" title="Удалить сохранённый план с этим названием">Удалить</button>' +
+      '<button type="button" class="btn primary" id="plPin" title="Весь план — в «Ведение производства»: склад, что докупить, этапы, графики">📌 В ведение производства</button></div>' +
       '<div class="in-chips" style="margin-top:10px"><span class="small muted">Как строим' + ELW_INDUSTRY.help('pl_mode') + '</span>' +
       '<span id="plModes" class="in-chips"></span><span id="plMarket" class="small muted" style="margin-left:8px"></span>' +
       '<button type="button" class="btn primary" id="plGo" style="margin-left:auto">Посчитать план</button></div>' +
       '<div class="small" id="plMsg" role="status" aria-live="polite" style="margin-top:6px"></div></section>' +
       '<section class="panel"><h2>Что строим <span class="muted small" id="plCount"></span></h2><div id="plItems"></div>' +
+      '<details class="in-sec" id="plFitBox" data-fold="pl_fit"' + (ELW_INDUSTRY.fold('pl_fit', 'x', 'x', false).indexOf(' open') > 0 ? ' open' : '') + '><summary>Вставить фит</summary>' +
+      '<div class="small muted" style="margin-top:6px">В игре: окно фитинга → «Копировать в буфер обмена» (формат EFT; подойдёт и Pyfa → Export). Корабль, модули, дроны и груз из фита добавятся в план — всё, что строится по чертежу.</div>' +
+      '<textarea id="plFit" rows="7" spellcheck="false" placeholder="[Vexor, PvE]&#10;Drone Damage Amplifier II&#10;…&#10;Hammerhead II x5" aria-label="Фит" ' +
+      'style="width:100%;box-sizing:border-box;margin:6px 0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:12.5px ui-monospace,Consolas,monospace"></textarea>' +
+      '<div class="in-chips"><label class="small muted">Сколько фитов <input id="plFitN" value="1" inputmode="numeric" style="width:5em;text-align:right;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px"></label>' +
+      '<label class="small"><input type="checkbox" id="plFitShip" checked> с кораблём</label>' +
+      '<button type="button" class="btn primary" id="plFitGo">Добавить в план</button></div><div class="small" id="plFitMsg" role="status" aria-live="polite" style="margin-top:6px"></div></details>' +
       '<details class="in-sec" id="plAdd" data-fold="pl_add"' + (ELW_INDUSTRY.fold('pl_add', 'x', 'x', true).indexOf(' open') > 0 ? ' open' : '') + '><summary>Добавить продукт</summary>' +
       '<div class="in-chips" style="margin-top:8px"><input id="plQ" type="search" placeholder="Название предмета…" aria-label="Поиск чертежа" spellcheck="false" ' +
       'style="flex:1 1 260px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px"></div>' +
@@ -49,6 +57,13 @@
     $('plName').addEventListener('input', function () { P.name = this.value; remember(); });
     $('plGo').addEventListener('click', calc);
     $('plSave').addEventListener('click', function () { savePlan(false); });
+    $('plPin').addEventListener('click', function () {
+      if (!P.items.length) { $('plMsg').textContent = 'Добавьте в план хотя бы один продукт.'; return; }
+      $('plMsg').textContent = 'Закрепляю план…';
+      ELW_INDUSTRY.projects.plan(P.items, P.mode, $('plName').value.trim()).then(function (j) { if (!j.ok) $('plMsg').textContent = j.message || 'Не получилось.'; },
+        function () { $('plMsg').textContent = 'Нет связи с трекером.'; });
+    });
+    $('plFitGo').addEventListener('click', addFit);
     $('plDel').addEventListener('click', function () { savePlan(true); });
     $('plSaved').addEventListener('change', function () {
       var p = P.plans.filter(function (x) { return x.name === this.value; }, this)[0];
@@ -66,6 +81,30 @@
     });
     api('/api/industry/catalog').then(function (j) { if (j.ok) { P.catalog = j.items; drawItems(); drawFound(); } });
     loadPlans();
+  }
+
+  // фит EFT → продукты плана (что строится по чертежу)
+  function addFit() {
+    var msg = $('plFitMsg'), text = $('plFit').value;
+    if (!text.trim()) { msg.textContent = 'Вставьте фит.'; return; }
+    msg.textContent = 'Разбираю фит…';
+    api('/api/industry/fit', { method: 'POST', headers: POST, body: JSON.stringify({ text: text, count: +String($('plFitN').value).replace(/\D/g, '') || 1 }) }).then(function (j) {
+      if (!j.ok) { msg.innerHTML = '<span class="in-bad">' + esc(j.message || 'Не получилось.') + '</span>'; return; }
+      var added = 0, withShip = $('plFitShip').checked;
+      j.items.forEach(function (it) {
+        if (!withShip && it.name === j.ship) return;
+        var cur = P.items.filter(function (i) { return i.id === it.id; })[0];
+        if (cur) cur.qty += it.qty; else P.items.push({ id: it.id, qty: it.qty });
+        added++;
+      });
+      if (!P.name && j.ship) { P.name = j.ship + (j.count > 1 ? ' ×' + j.count : '') + ' — фит'; $('plName').value = P.name; }
+      remember(); drawItems(); drawFound();
+      var h = '<span class="in-good">' + esc(j.ship || 'Фит') + (j.count > 1 ? ' ×' + j.count : '') + ': добавлено в план ' + added + ' поз.</span>';
+      if (j.buy.length) h += '<div class="muted">Без чертежа — только купить: ' + esc(j.buy.map(function (b) { return b.name + ' ×' + b.qty; }).join(', ')) + '</div>';
+      if (j.skipped.length) h += '<div style="color:var(--warn)">Не узнал: ' + esc(j.skipped.map(function (b) { return b.name; }).join(', ')) + '</div>';
+      msg.innerHTML = h;
+      if (P.items.length) calc();
+    }, function () { msg.textContent = 'Нет связи с трекером.'; });
   }
 
   function loadPlans(sel) {
@@ -86,6 +125,7 @@
   }
 
   function onClick(e) {
+    if (e.target.id === 'plDefaults') { ELW_INDUSTRY.show('proj'); if (ELW_INDUSTRY.projects) ELW_INDUSTRY.projects.defaults(); return; }
     var b = e.target.closest && e.target.closest('[data-cat],[data-tech],[data-mode],[data-add],[data-del]');
     if (!b) return;
     if (b.hasAttribute('data-cat')) { P.cat = b.getAttribute('data-cat'); drawFound(); }
@@ -107,7 +147,7 @@
     $('plModes').innerHTML = chip('mode', 'full', 'Полный цикл', P.mode === 'full') + chip('mode', 'buy', 'Покупаю компоненты', P.mode === 'buy');
     var se = (ELW_INDUSTRY.settings && ELW_INDUSTRY.settings()) || {};
     $('plMarket').innerHTML = 'цены: ' + esc({ jita: 'Jita 4-4', amarr: 'Amarr', dodixie: 'Dodixie', rens: 'Rens', hek: 'Hek' }[se.market] || 'Jita 4-4') +
-      ' · сооружение, налоги, навыки — на экране «Калькулятор»';
+      ' · сооружение, налоги, навыки — <button type="button" class="in-back" id="plDefaults" style="margin:0">настройки по умолчанию</button>';
   }
   function drawItems() {
     $('plCount').textContent = P.items.length ? '(' + P.items.length + ')' : '';

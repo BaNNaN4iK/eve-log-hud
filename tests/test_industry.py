@@ -398,6 +398,48 @@ class TestProjects(unittest.TestCase):
         p2 = self.pr.create("Crystalline Carbonide", {"runs": 1, "structure": "tatara", "security": "null"}, now=1000)
         self.assertIsNone(self.pr.detail(p2, now=1000)["raw"])               # строить нечего — сырьё и есть закупка
 
+    def test_draft_pin_build(self):
+        d = self.pr.create("Hobgoblin II", self.s, now=1000, draft=True)
+        d2 = self.pr.create("Hobgoblin II", self.s, now=1001, draft=True)            # новый черновик заменяет прежний
+        self.assertIsNone(self.pr.get(d["id"]))
+        self.assertTrue(self.pr.detail(d2, now=1001)["ok"])
+        self.assertEqual(d2["snaps"], [])                                    # у черновика снимков цен нет
+        self.pr.set_build(d2, 2454, True)                                    # Hobgoblin I строю сам
+        det = self.pr.detail(d2, now=1002)
+        self.assertEqual({m["name"] for m in det["materials"]}, {"Morphite", "Nocxium", "Tritanium", "Pyerite"})
+        self.assertTrue(next(m for m in det["calc"]["tree"] if m["name"] == "Hobgoblin I")["built"])
+        self.assertIn("compare", det["calc"])
+        self.pr.pin(d2, now=1003)
+        self.assertFalse(d2["draft"])
+
+    def test_plan_project(self):
+        p = self.pr.create("", self.s, "Хобы и карбонид", now=1000, items=[(2456, 10), (16670, 200)], mode="buy")
+        d = self.pr.detail(p, now=1000)
+        self.assertTrue(d["ok"])
+        self.assertEqual(d["calc"]["kind"], "plan")
+        self.assertEqual([x["name"] for x in d["calc"]["products"]], ["Hobgoblin II", "Crystalline Carbonide"])
+        self.assertIn("Hobgoblin I", {m["name"] for m in d["materials"]})   # «покупаю компоненты»
+        self.assertIsNotNone(d["raw"])                                      # полный цикл — сырьё
+        self.assertIn("Tritanium", {m["name"] for m in d["raw"]["materials"]})
+        self.assertEqual(d["calc"]["product"]["units"], 210)
+        self.assertEqual({j["depth"] for j in d["jobs"]}, {0})
+        self.pr.paste(p, "Hobgoblin I 10", now=1000)
+        self.assertEqual(next(m for m in self.pr.detail(p, now=1000)["materials"] if m["name"] == "Hobgoblin I")["left"], 0)
+        self.pr.set_status(p, "building", now=2000)
+        self.pr.set_status(p, "done", now=3000)
+        self.assertEqual(p["batches"][0]["units"], 210)
+        self.assertEqual(self.pr.summary(p, now=3100)["kind"], "plan")
+
+    def test_fit(self):
+        fit = "[Hobgoblin II, test]\nHobgoblin I x3\nMorphite x10\nUnknown Thing\n[Empty High slot]\nHobgoblin II, Tritanium"
+        r = ind.fit_items(self.calc, fit, 2)
+        self.assertEqual(r["ship"], "Hobgoblin II")
+        self.assertEqual({i["name"]: i["qty"] for i in r["items"]}, {"Hobgoblin II": 4, "Hobgoblin I": 6})
+        self.assertEqual([b["name"] for b in r["buy"]], ["Morphite"])
+        self.assertEqual([b["name"] for b in r["skipped"]], ["Unknown Thing"])
+        with self.assertRaises(ValueError):
+            ind.fit_items(self.calc, "   ")
+
     def test_price_series_cached(self):
         ser = self.pr.price_series("jita", 2456, now=100)
         self.assertEqual(len(ser), 20)
@@ -448,6 +490,17 @@ class TestProjectsHttp(unittest.TestCase):
             self.assertFalse(req("/api/industry/projects", "POST", {"action": "status", "id": pid, "status": "nope"})["ok"])
             self.assertTrue(os.path.exists(os.path.join(td.data, "industry_projects.json")))
             self.assertTrue(req("/api/industry/projects", "POST", {"action": "delete", "id": pid})["ok"])
+            r = req("/api/industry/projects", "POST", {"action": "draft", "product": "Vexor", "settings": {"me": 5}})
+            self.assertTrue(r["ok"])
+            self.assertEqual(req(f"/api/industry/project?id={r['id']}")["calc"]["settings"]["me"], 5)
+            self.assertEqual(req("/api/industry/projects")["projects"], [])          # черновика в списке нет
+            self.assertTrue(req("/api/industry/projects", "POST", {"action": "pin", "id": r["id"]})["ok"])
+            self.assertEqual(len(req("/api/industry/projects")["projects"]), 1)
+            self.assertTrue(req("/api/industry/projects", "POST", {"action": "settings", "id": r["id"], "settings": {"structure": "raitaru"}, "as_default": True})["ok"])
+            self.assertEqual(req("/api/industry/settings")["settings"]["structure"], "raitaru")
+            fit = req("/api/industry/fit", "POST", {"text": "[Vexor, x]\nDamage Control II", "count": 3})
+            self.assertEqual(fit["ship"], "Vexor")
+            self.assertIn({"id": 626, "name": "Vexor", "qty": 3}, fit["items"])
             self.assertFalse(req(f"/api/industry/project?id={pid}")["ok"])
             srv.shutdown()
             srv.server_close()

@@ -1,4 +1,4 @@
-// Вкладка модуля «Производство». Подключается ядром (window.ELW), см. modules/README.md.
+// Вкладка модуля «Производство»: сканер, план и ведение производства (расчёт предмета — там же). Подключается ядром (window.ELW).
 (function (ELW) {
   'use strict';
   if (!ELW || !ELW.addTab) return;
@@ -30,7 +30,7 @@
     salestax: 'Налог с продаж: берётся с каждой продажи. Зависит от навыка Accounting (при Accounting 5 около 3,6%).',
     broker: 'Комиссия брокера за выставление ордера — только если продаёте своим ордером. Зависит от навыков и репутации (обычно 1–3%).',
     pl_mode: '«Полный цикл» — всё, что строится по чертежу, строите сами: компоненты, реакции из лунных материалов, изобретаете копии T2. «Покупаю компоненты» — строите только сами продукты, всё остальное покупаете.',
-    pl_inv: 'Копии чертежей T2 получают изобретением из копии T1 и датакоров, с шансом. Попыток берётся с запасом: прогоны ÷ (шанс × прогонов в одной копии). Шанс растёт с навыками наук и шифрования (на экране «Калькулятор»).',
+    pl_inv: 'Копии чертежей T2 получают изобретением из копии T1 и датакоров, с шансом. Попыток берётся с запасом: прогоны ÷ (шанс × прогонов в одной копии). Шанс растёт с навыками наук и шифрования (в настройках расчёта).',
     pl_left: 'Прогон даёт целую пачку, поэтому часто выходит больше, чем нужно. Лишнее остаётся у вас; его стоимость (по цене мгновенной продажи) вычитается из себестоимости.',
     sci: 'Уровень двух научных навыков для изобретения (например, Mechanical Engineering и Electronic Engineering). Шанс растёт на 1/30 за уровень каждого.',
     enc: 'Навык шифрования расы (Amarr / Caldari / Gallente / Minmatar Encryption Methods): шанс изобретения +1/40 за уровень.',
@@ -110,6 +110,7 @@
       '.pj-have:focus{border-color:var(--accent);outline:none}.pj-paste{background:var(--panel2);border-radius:8px;padding:10px;margin-bottom:10px}.pj-paste textarea{width:100%;box-sizing:border-box;margin:6px 0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:12.5px ui-monospace,Consolas,monospace}' +
       '.pj-bars{display:flex;align-items:flex-end;gap:3px;height:70px;margin:4px 0 10px}.pj-bars>div{flex:1;height:100%;display:flex;align-items:flex-end}.pj-bars span{display:block;width:100%;border-radius:3px 3px 0 0}' +
       '.pj-log{list-style:none;padding:0;margin:0;font-size:12.5px;max-height:240px;overflow:auto}.pj-log li{padding:2px 0}' +
+      '.pj-draft{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px;margin:8px 0;border-radius:10px;background:color-mix(in srgb,var(--warn) 14%,var(--panel2));border:1px dashed var(--warn)}' +
       '.in-cp{cursor:copy;border-bottom:1px dashed transparent;transition:color .15s}.in-cp:hover,.in-cp:focus{border-bottom-color:var(--muted);outline:none}.in-cp.in-copied{color:var(--good);border-bottom-color:var(--good)}' +
       '.in-cp.in-copied::after{content:" \\2713  скопировано";font-size:11px}' +
       '.pj-rawbar{background:var(--panel2);border-radius:10px;padding:10px 12px;margin:4px 0 10px;display:flex;flex-direction:column;gap:6px}' +
@@ -117,53 +118,23 @@
       '.pj-hbars{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:6px 18px;margin:4px 0 10px}.pj-hb{display:grid;grid-template-columns:minmax(120px,1.2fr) 2fr auto;gap:8px;align-items:center;font-size:12.5px}' +
       '.pj-hb .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pj-hb .tr{height:10px;background:var(--panel);border-radius:5px;overflow:hidden}.pj-hb .tr>div{height:100%;border-radius:5px}.pj-hb .vl{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}',
     html: '<div class="in-views" role="tablist" aria-label="Экран производства"><button type="button" class="in-chip" id="inViewScan" role="tab">Сканер прибыльности</button>' +
-      '<button type="button" class="in-chip" id="inViewCalc" role="tab">Калькулятор</button><button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button>' +
+      '<button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button>' +
       '<button type="button" class="in-chip" id="inViewProj" role="tab">📌 Ведение производства</button></div>' +
-      '<div id="inScanView"></div><div id="inPlanView"></div><div id="inProjView"></div><div id="inCalcView">' +
-      '<section class="panel"><h2>Калькулятор производства <span class="muted small">материалы, стоимость работы, время и прибыль</span></h2>' +
-      '<div class="in-grid" style="grid-template-columns:minmax(260px,2fr) repeat(3,minmax(110px,1fr))">' +
-      '<label class="small muted">' + lab('Что строим', 'product') + '<input id="inProduct" list="inList" autocomplete="off" spellcheck="false" placeholder="например: Vexor, Hobgoblin II, Ishtar"><datalist id="inList"></datalist></label>' +
-      inp('inRuns', 'Прогонов', '1', 'runs') + lv('inMe', 'ME чертежа', 10, 'me') + lv('inTe', 'TE чертежа', 20, 'te') +
-      '</div>' +
-      '<details class="in-set" open><summary>Где строим и навыки</summary><div class="in-grid">' +
-      '<label class="small muted">' + lab('Сооружение', 'struct') + '<select id="inStruct">' + opt('station', 'станция NPC') + opt('raitaru', 'Raitaru') + opt('azbel', 'Azbel') + opt('sotiyo', 'Sotiyo') +
-        opt('athanor', 'Athanor (реакции)') + opt('tatara', 'Tatara (реакции)') + opt('other', 'другая структура') + '</select></label>' +
-      '<label class="small muted">' + lab('Риг', 'rig') + '<select id="inRig">' + opt('none', 'нет') + opt('t1', 'T1') + opt('t2', 'T2') + '</select></label>' +
-      '<label class="small muted">' + lab('Безопасность', 'sec') + '<select id="inSec">' + opt('high', 'хай-сек') + opt('low', 'лоу-сек') + opt('null', 'нули / ВХ') + '</select></label>' +
-      '<label class="small muted">' + lab('Система (для индекса)', 'system') + '<input id="inSystem" spellcheck="false" placeholder="например: Jita"></label>' +
-      inp('inIndex', 'Свой индекс, %', 'авто', 'index') +
-      inp('inTax', 'Налог сооружения, %', '0,25', 'tax') +
-      inp('inScc', 'Сбор SCC, %', '4', 'scc') +
-      lv('inInd', 'Industry', 5, 'ind') + lv('inAdv', 'Advanced Industry', 5, 'adv') +
-      lv('inReact', 'Reactions', 5, 'react') +
-      lv('inCme', 'ME компонентов', 10, 'cme') + lv('inCte', 'TE компонентов', 20, 'cte') +
-      lv('inSci', 'Науки (изобретение)', 5, 'sci') + lv('inEnc', 'Шифрование', 5, 'enc') +
-      '</div></details>' +
-      '<details class="in-set"><summary>Цены и налоги</summary><div class="in-grid">' +
-      '<label class="small muted">' + lab('Рынок', 'market') + '<select id="inMarket">' + opt('jita', 'Jita 4-4') + opt('amarr', 'Amarr') + opt('dodixie', 'Dodixie') + opt('rens', 'Rens') + opt('hek', 'Hek') + '</select></label>' +
-      '<label class="small muted">' + lab('Материалы покупаю', 'buy') + '<select id="inBuy">' + opt('sell', 'сразу (по ордерам продажи)') + opt('buy', 'своим ордером (по покупке)') + opt('split', 'по середине') + '</select></label>' +
-      '<label class="small muted">' + lab('Продукт продаю', 'sell') + '<select id="inSell">' + opt('sell', 'своим ордером (по продаже)') + opt('buy', 'сразу (в ордера покупки)') + opt('split', 'по середине') + '</select></label>' +
-      inp('inSalesTax', 'Налог с продаж, %', '3,6', 'salestax') + inp('inBroker', 'Брокер, %', '1,5', 'broker') +
-      '</div></details>' +
-      '<div class="controls" style="margin-top:10px"><button type="button" class="btn primary" id="inGo">Посчитать</button>' +
-      '<span class="small" id="inMsg" role="status" aria-live="polite"></span></div></section><div id="inResult"></div></div>',
+      '<div id="inScanView"></div><div id="inPlanView"></div><div id="inProjView"></div>',
     render: function () {
       init();
       showView();
-      if (I.view === 'scan') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(); return; }
-      if (I.view === 'plan') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.plan) ELW_INDUSTRY.plan.render(); return; }
-      if (I.view === 'proj') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.projects) ELW_INDUSTRY.projects.render(); return; }
-      var key = JSON.stringify((ELW.S && ELW.S.sort) || {});             // ядро зовёт render() каждые 4 с и при сортировке
-      if (I.sortKey !== key) { I.sortKey = key; draw(); }
+      var X = window.ELW_INDUSTRY || {};
+      if (I.view === 'scan') { if (X.scanner) X.scanner.render(); return; }
+      if (I.view === 'plan') { if (X.plan) X.plan.render(); return; }
+      if (X.projects) X.projects.render();
     } });
 
-  var F = [['inRuns', 'runs'], ['inMe', 'me'], ['inTe', 'te'], ['inStruct', 'structure'], ['inRig', 'rig'], ['inSec', 'security'], ['inSystem', 'system'],
-    ['inIndex', 'cost_index'], ['inTax', 'facility_tax'], ['inScc', 'scc'], ['inInd', 'industry'], ['inAdv', 'adv_industry'], ['inReact', 'reactions'],
-    ['inCme', 'comp_me'], ['inCte', 'comp_te'], ['inMarket', 'market'], ['inBuy', 'buy_mode'], ['inSell', 'sell_mode'], ['inSalesTax', 'sales_tax'], ['inBroker', 'broker'], ['inSci', 'inv_sci'], ['inEnc', 'inv_enc']];
-  var I = { inited: false, res: null, build: [], t: null, view: 'scan', week: null };
-  try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'calc' || v0 === 'plan' || v0 === 'proj' ? v0 : 'scan'; } catch (e) { }
+  var I = { inited: false, view: 'scan', defaults: null, waiting: [] };
+  try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'plan' ? 'plan' : v0 === 'proj' || v0 === 'calc' ? 'proj' : 'scan'; } catch (e) { }
+  var VIEWS = [['scan', 'inScanView', 'inViewScan'], ['plan', 'inPlanView', 'inViewPlan'], ['proj', 'inProjView', 'inViewProj']];
   function showView() {
-    [['scan', 'inScanView', 'inViewScan'], ['calc', 'inCalcView', 'inViewCalc'], ['plan', 'inPlanView', 'inViewPlan'], ['proj', 'inProjView', 'inViewProj']].forEach(function (v) {
+    VIEWS.forEach(function (v) {
       $(v[1]).hidden = I.view !== v[0];
       $(v[2]).classList.toggle('on', I.view === v[0]);
       $(v[2]).setAttribute('aria-selected', I.view === v[0]);
@@ -173,12 +144,15 @@
     I.view = v;
     try { localStorage.setItem('elw.industry.view', v); } catch (e) { }
     showView();
-    if (v === 'scan' && window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(true);
-    if (v === 'plan' && window.ELW_INDUSTRY && ELW_INDUSTRY.plan) ELW_INDUSTRY.plan.render();
-    if (v === 'proj' && window.ELW_INDUSTRY && ELW_INDUSTRY.projects) ELW_INDUSTRY.projects.render(true);
+    var X = window.ELW_INDUSTRY || {};
+    if (v === 'scan' && X.scanner) X.scanner.render(true);
+    if (v === 'plan' && X.plan) X.plan.render();
+    if (v === 'proj' && X.projects) X.projects.render(true);
     window.scrollTo(0, 0);
   }
-  // сворачиваемые разделы: что свёрнуто — запоминается (общий помощник для калькулятора, сканера и плана)
+  VIEWS.forEach(function (v) { $(v[2]).addEventListener('click', function () { setView(v[0]); }); });
+
+  // сворачиваемые разделы: что свёрнуто — запоминается (общий помощник для сканера, плана и ведения)
   var FOLD = {};
   try { FOLD = JSON.parse(localStorage.getItem('elw.industry.folded') || '{}') || {}; } catch (e) { FOLD = {}; }
   function fold(key, title, body, open) {
@@ -193,21 +167,68 @@
     try { localStorage.setItem('elw.industry.folded', JSON.stringify(FOLD)); } catch (err) { }
   }, true);
 
-  // для сканера (scan.js): открыть предмет в калькуляторе, общие настройки и подсказки
+  // ----- форма настроек расчёта: одна и та же для проекта и для «настроек по умолчанию» -----
+  var F = [['Runs', 'runs'], ['Me', 'me'], ['Te', 'te'], ['Struct', 'structure'], ['Rig', 'rig'], ['Sec', 'security'], ['System', 'system'],
+    ['Index', 'cost_index'], ['Tax', 'facility_tax'], ['Scc', 'scc'], ['Ind', 'industry'], ['Adv', 'adv_industry'], ['React', 'reactions'],
+    ['Cme', 'comp_me'], ['Cte', 'comp_te'], ['Market', 'market'], ['Buy', 'buy_mode'], ['Sell', 'sell_mode'], ['SalesTax', 'sales_tax'],
+    ['Broker', 'broker'], ['Sci', 'inv_sci'], ['Enc', 'inv_enc']];
+  function form(px, o) {
+    o = o || {};
+    var top = (o.runs === false ? '' : inp(px + 'Runs', 'Прогонов', '1', 'runs')) + (o.me === false ? '' : lv(px + 'Me', 'ME чертежа', 10, 'me') + lv(px + 'Te', 'TE чертежа', 20, 'te'));
+    return (top ? '<div class="in-grid">' + top + '</div>' : '') +
+      '<details class="in-set" open><summary>Где строим и навыки</summary><div class="in-grid">' +
+      '<label class="small muted">' + lab('Сооружение', 'struct') + '<select id="' + px + 'Struct">' + opt('station', 'станция NPC') + opt('raitaru', 'Raitaru') + opt('azbel', 'Azbel') + opt('sotiyo', 'Sotiyo') +
+        opt('athanor', 'Athanor (реакции)') + opt('tatara', 'Tatara (реакции)') + opt('other', 'другая структура') + '</select></label>' +
+      '<label class="small muted">' + lab('Риг', 'rig') + '<select id="' + px + 'Rig">' + opt('none', 'нет') + opt('t1', 'T1') + opt('t2', 'T2') + '</select></label>' +
+      '<label class="small muted">' + lab('Безопасность', 'sec') + '<select id="' + px + 'Sec">' + opt('high', 'хай-сек') + opt('low', 'лоу-сек') + opt('null', 'нули / ВХ') + '</select></label>' +
+      '<label class="small muted">' + lab('Система (для индекса)', 'system') + '<input id="' + px + 'System" spellcheck="false" placeholder="например: Jita"></label>' +
+      inp(px + 'Index', 'Свой индекс, %', 'авто', 'index') + inp(px + 'Tax', 'Налог сооружения, %', '0,25', 'tax') + inp(px + 'Scc', 'Сбор SCC, %', '4', 'scc') +
+      lv(px + 'Ind', 'Industry', 5, 'ind') + lv(px + 'Adv', 'Advanced Industry', 5, 'adv') + lv(px + 'React', 'Reactions', 5, 'react') +
+      lv(px + 'Cme', 'ME компонентов', 10, 'cme') + lv(px + 'Cte', 'TE компонентов', 20, 'cte') +
+      lv(px + 'Sci', 'Науки (изобретение)', 5, 'sci') + lv(px + 'Enc', 'Шифрование', 5, 'enc') + '</div></details>' +
+      '<details class="in-set"><summary>Цены и налоги</summary><div class="in-grid">' +
+      '<label class="small muted">' + lab('Рынок', 'market') + '<select id="' + px + 'Market">' + opt('jita', 'Jita 4-4') + opt('amarr', 'Amarr') + opt('dodixie', 'Dodixie') + opt('rens', 'Rens') + opt('hek', 'Hek') + '</select></label>' +
+      '<label class="small muted">' + lab('Материалы покупаю', 'buy') + '<select id="' + px + 'Buy">' + opt('sell', 'сразу (по ордерам продажи)') + opt('buy', 'своим ордером (по покупке)') + opt('split', 'по середине') + '</select></label>' +
+      '<label class="small muted">' + lab('Продукт продаю', 'sell') + '<select id="' + px + 'Sell">' + opt('sell', 'своим ордером (по продаже)') + opt('buy', 'сразу (в ордера покупки)') + opt('split', 'по середине') + '</select></label>' +
+      inp(px + 'SalesTax', 'Налог с продаж, %', '3,6', 'salestax') + inp(px + 'Broker', 'Брокер, %', '1,5', 'broker') + '</div></details>';
+  }
+  function readForm(px) {
+    var s = {};
+    F.forEach(function (f) { var el = $(px + f[0]); if (el) s[f[1]] = el.value; });
+    return s;
+  }
+  function fillForm(px, s) {
+    F.forEach(function (f) { var el = $(px + f[0]), v = (s || {})[f[1]]; if (el) el.value = v === null || v === undefined ? '' : String(v).replace('.', ','); });
+  }
+
+  // ----- общий помощник для сканера, плана и ведения -----
   window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
-  ELW_INDUSTRY.open = function (name, src, me, te) {
-    $('inProduct').value = name; $('inRuns').value = '1'; I.build = [];
-    if (src === 'inv') { $('inMe').value = '2'; $('inTe').value = '4'; }           // копия после изобретения
-    else if (me !== undefined && me !== null) { $('inMe').value = String(me); $('inTe').value = String(te); }   // как в сканере
-    setView('calc'); calc();
+  var X = window.ELW_INDUSTRY;
+  X.fold = fold;
+  X.show = setView;
+  X.help = function (key) { return help(key); };
+  X.ico = function (t) { return ico(t); };
+  X.form = form; X.readForm = readForm; X.fillForm = fillForm;
+  // настройки по умолчанию (для новых расчётов, сканера и плана): что сохранено на сервере
+  X.settings = function () { var s = {}; Object.keys(I.defaults || {}).forEach(function (k) { s[k] = I.defaults[k]; }); return s; };
+  X.defaults = function (fn) { if (I.defaults) fn(X.settings()); else I.waiting.push(fn); };
+  X.saveDefaults = function (s) {
+    return api('/api/industry/settings', { method: 'POST', headers: POST, body: JSON.stringify({ settings: s }) }).then(function (j) {
+      if (j.ok) I.defaults = j.settings;
+      return j;
+    });
   };
-  ELW_INDUSTRY.settings = function () { return settings(); };
-  ELW_INDUSTRY.help = function (key) { return help(key); };
-  ELW_INDUSTRY.ico = function (t) { return ico(t); };
-  ELW_INDUSTRY.fold = fold;
-  ELW_INDUSTRY.show = setView;
+  X.online = function () { return I.online !== false; };
+  // открыть предмет: расчёт-черновик в «Ведении производства» (раньше — «Калькулятор»)
+  X.open = function (name, src, me, te) {
+    var over = {};
+    if (src === 'inv') { over.me = 2; over.te = 4; }                       // копия после изобретения
+    else if (me !== undefined && me !== null) { over.me = me; over.te = te; }
+    setView('proj');
+    if (X.projects) X.projects.draft(name, over);
+  };
   // название предмета: нажатие копирует его (для поиска в игре)
-  ELW_INDUSTRY.cp = function (name) {
+  X.cp = function (name) {
     return '<span class="in-cp" data-copy-name="' + esc(name) + '" tabindex="0" role="button" title="Нажмите — скопировать название">' + esc(name) + '</span>';
   };
   // копирование: через скрытое поле, а если не вышло — буфер обмена браузера (он может ждать разрешения)
@@ -221,12 +242,11 @@
       document.body.removeChild(ta);
       return ok ? Promise.resolve() : Promise.reject(new Error('copy'));
     }
-    // сначала — сразу в момент нажатия (работает везде, где есть нажатие); не вышло — буфер обмена браузера
     return legacy().then(null, function () {
       return navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : Promise.reject(new Error('copy'));
     });
   }
-  ELW_INDUSTRY.copyText = copyText;
+  X.copyText = copyText;
   function copyName(el) {
     var name = el.getAttribute('data-copy-name');
     var done = function (ok) { el.classList.add(ok ? 'in-copied' : 'in-bad'); el.setAttribute('title', ok ? 'Скопировано: ' + name : 'Не удалось скопировать');
@@ -236,27 +256,17 @@
   document.addEventListener('click', function (e) { var el = e.target.closest && e.target.closest('[data-copy-name]'); if (el) { e.stopPropagation(); copyName(el); } }, true);
   document.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-copy-name]')) { e.preventDefault(); copyName(e.target); } });
 
-  function settings() {
-    var s = { build: I.build };
-    F.forEach(function (f) { s[f[1]] = $(f[0]).value; });
-    return s;
-  }
-  function fill(s) {
-    F.forEach(function (f) { var v = s[f[1]]; $(f[0]).value = v === null || v === undefined ? '' : String(v).replace('.', ','); });
-    I.build = s.build || [];
-  }
   function init() {
     if (I.inited) return;
     I.inited = true;
     api('/api/industry/settings').then(function (j) {
       if (!j.ok) return;
-      fill(j.settings);
-      if (j.product) $('inProduct').value = j.product;
-      if (!j.prices) $('inMsg').textContent = 'Онлайн-функции выключены: будут материалы и время, без цен.';
+      I.defaults = j.settings; I.online = !!j.prices;
+      var w = I.waiting; I.waiting = [];
+      w.forEach(function (fn) { fn(X.settings()); });
     }, function () { });
   }
-
-  // подсказка у правого края окна — открывать влево, чтобы не уходила за экран
+  // подсказка у края окна не уезжает за экран
   function placeTip(e) {
     var host = e.target.closest && e.target.closest('.in-help, .tile.in-t');
     var tip = host && host.querySelector('.in-tip');
@@ -267,157 +277,4 @@
   }
   document.addEventListener('mouseover', placeTip);
   document.addEventListener('focusin', placeTip);
-
-  $('inProduct').addEventListener('input', function () {
-    var q = this.value;
-    clearTimeout(I.t);
-    if (q.length < 2) return;
-    I.t = setTimeout(function () {
-      api('/api/industry/search?q=' + encodeURIComponent(q)).then(function (j) {
-        $('inList').innerHTML = (j.items || []).map(function (i) { return '<option value="' + esc(i.name) + '">' + (i.kind === 'r' ? 'реакция' : '') + '</option>'; }).join('');
-      }, function () { });
-    }, 200);
-  });
-  $('inProduct').addEventListener('change', function () { I.build = []; });
-  $('inProduct').addEventListener('keydown', function (e) { if (e.key === 'Enter') calc(); });
-  $('inGo').addEventListener('click', function () { calc(); });
-  $('inViewScan').addEventListener('click', function () { setView('scan'); });
-  $('inViewCalc').addEventListener('click', function () { setView('calc'); });
-  $('inViewPlan').addEventListener('click', function () { setView('plan'); });
-  $('inViewProj').addEventListener('click', function () { setView('proj'); });
-
-  function calc() {
-    var msg = $('inMsg'), btn = $('inGo');
-    if (!$('inProduct').value.trim()) { msg.textContent = 'Укажите, что строить.'; return; }
-    btn.disabled = true; msg.textContent = 'Считаю…';
-    api('/api/industry', { method: 'POST', headers: POST, body: JSON.stringify({ product: $('inProduct').value, settings: settings() }) }).then(function (j) {
-      btn.disabled = false;
-      if (!j.ok) { msg.innerHTML = '<span class="in-bad">' + esc(j.message || 'Не получилось.') + '</span>'; return; }
-      msg.textContent = j.note || '';
-      I.res = j; I.build = j.settings.build || []; I.week = null;
-      draw();
-      api('/api/industry/history?market=' + encodeURIComponent(j.settings.market) + '&ids=' + j.product.type_id).then(function (h) {
-        var w = h.history && h.history[String(j.product.type_id)];
-        if (w && I.res === j) { I.week = w; draw(); }
-      }, function () { });
-      setTimeout(function () { if (I.res === j) draw(); }, 4000);           // иконки догружаются
-    }, function () { btn.disabled = false; msg.textContent = 'Нет связи с трекером.'; });
-  }
-
-  // строки материалов: дерево с вложенными компонентами, которые строим сами
-  function matRows(node, depth, out) {
-    node.materials.forEach(function (m) {
-      out.push({ m: m, depth: depth, runs: node.runs });
-      if (m.build) matRows(m.build, depth + 1, out);
-    });
-    return out;
-  }
-
-  function draw() {
-    var r = I.res, box = $('inResult');
-    if (!r) { box.innerHTML = ''; return; }
-    var t = r.totals, p = r.product, up = r.unit_prices || {};
-    var tile = function (k, v, s, cls, key) {
-      return '<div class="tile' + (key ? ' in-t" tabindex="0' : '') + '"><div class="k">' + k + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div><div class="s">' + (s || '') + '</div>' +
-        (key ? '<span class="in-tip" role="tooltip">' + esc(HELP[key]) + '</span>' : '') + '</div>';
-    };
-    var cmp = r.compare || {}, cs = cmp.sell || {}, cb = cmp.buy || {}, best = cs.isk_hour !== null && cs.isk_hour !== undefined ? cs : cb;
-    var week = I.week;
-    var h = '<section class="panel"><div class="controls" style="justify-content:space-between;margin-bottom:0"><button type="button" class="in-back" id="inBack">← к сканеру</button>' +
-      '<span><button type="button" class="btn" id="inPin" title="Закрепить чертёж с этими настройками: склад, что докупить, этапы, графики цен">📌 Закрепить</button> <span class="small muted" id="inPinMsg" role="status"></span></span></div><h2>' + ico(p.type_id) + esc(p.name) + ' <span class="muted small">' + (p.kind === 'r' ? 'реакция' : 'производство') + ' · ' + L.fmtInt(p.units) + ' шт. · ' +
-      esc(r.market_name) + (r.cost_index !== null && r.cost_index !== undefined ? ' · индекс ' + String(Math.round(r.cost_index * 100) / 100).replace('.', ',') + '%' + (r.system ? ' (' + esc(r.system) + ')' : '') : '') + '</span></h2>';
-    if (r.warning) h += '<p class="small in-bad">' + esc(r.warning) + '</p>';
-    if (r.cost_index === null || r.cost_index === undefined) h += '<p class="small muted">Стоимость работы не посчитана: укажите систему (индекс возьмётся из игры) или впишите свой индекс.</p>';
-    if (r.missing_price && r.missing_price.length) h += '<p class="small" style="color:var(--warn)">Нет цены на рынке: ' + esc(r.missing_price.join(', ')) + '</p>';
-    h += '<div class="tiles">' +
-      tile('ISK в час', isk(cs.isk_hour), 'продажа своим ордером', cs.isk_hour > 0 ? 'in-good' : cs.isk_hour < 0 ? 'in-bad' : '', 't_iskh') +
-      tile('Прибыль за прогон', isk(cs.per_run), r.tree.runs > 1 ? 'за все прогоны ' + isk(cs.profit) : '', cs.per_run > 0 ? 'in-good' : cs.per_run < 0 ? 'in-bad' : '', 't_profit') +
-      tile('Маржа', cs.margin === null || cs.margin === undefined ? '—' : String(cs.margin).replace('.', ',') + '%', 'мгновенно ' + (cb.margin === null || cb.margin === undefined ? '—' : String(cb.margin).replace('.', ',') + '%')) +
-      tile('Спрос за неделю', week ? L.fmtInt(week.week) : '…', week ? (week.week ? '≈ ' + L.fmtInt(Math.round(week.week / 7)) + ' в день' : 'продаж не было') : 'загружаю', week && week.week < 7 ? 'in-bad' : '') + '</div>';
-    var col = function (title, c, color, mode) {
-      var row = function (k, v, cls) { return '<dt' + (cls ? ' class="' + cls + '"' : '') + '>' + k + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + v + '</dd>'; };
-      return '<div style="--c:' + color + '"><h3>' + title + '</h3><dl>' +
-        row('Цена продукта', isk(c.price)) + row('Выручка', isk(c.revenue)) + row('Налоги' + (mode === 'sell' ? ' и брокер' : ''), c.fees === null || c.fees === undefined ? '—' : '−' + isk(c.fees)) +
-        row('Материалы', t.materials === null ? '—' : '−' + isk(t.materials)) + row('Работы', t.jobs === null ? '—' : '−' + isk(t.jobs)) +
-        row('Прибыль', '<span class="' + (c.profit > 0 ? 'in-good' : c.profit < 0 ? 'in-bad' : '') + '">' + isk(c.profit) + '</span>', 'tot') +
-        row('ISK в час', isk(c.isk_hour)) + row('Маржа', c.margin === null || c.margin === undefined ? '—' : String(c.margin).replace('.', ',') + '%') + '</dl></div>';
-    };
-    h += fold('c_cmp', 'Продажа: своим ордером и мгновенно', '<div class="in-cmp" style="margin-top:4px">' + col('Продажа своим ордером', cs, 'var(--good)', 'sell') + col('Мгновенная продажа', cb, 'var(--accent)', 'buy') + '</div>');
-    h += '<div class="tiles" style="margin-top:12px">' +
-      tile('Себестоимость', isk(t.cost), 'за штуку ' + isk(t.per_unit) + ' ISK', '', 't_cost') +
-      tile('Материалы', isk(t.materials), 'работы ' + isk(t.jobs) + ' ISK', '', 't_mat') +
-      tile('Время', dur(t.top_time), r.jobs.length > 1 ? 'всех работ подряд ' + dur(t.time) : '', '', 't_time') +
-      tile('Закупка', L.fmtInt(t.volume) + ' м³', r.shopping.length + ' позиций', '', 't_vol') + '</div>';
-    if (/ II$| III$/.test(p.name) || r.tree.materials.some(function (m) { return m.kind && /^(R\.A\.M|Construction Blocks)/.test(m.name); })) {
-      h += '<p class="small muted">Чертежи T2 после изобретения обычно ME 2 / TE 4 — проверьте ME и TE.</p>';
-    }
-
-    // материалы (дерево)
-    var rows = matRows(r.tree, 0, []);
-    var canBuild = rows.some(function (x) { return x.m.buildable; });
-    h += fold('c_mats', 'Материалы <span class="n">(' + rows.length + ') — ' + (canBuild ? 'отметьте, что строите сами, а не покупаете' :
-      'всё покупается: построить по чертежу здесь ничего нельзя (минералы и другое сырьё добывают)') + '</span>',
-      table('inMats', rows.map(function (x) {
-        var m = x.m, price = up[String(m.type_id)];
-        return { name: m.name, qty: m.qty, depth: x.depth, runs: x.runs, m: m, price: price, total: price !== null && price !== undefined ? price * m.qty : null };
-      }), [
-        { k: '', t: 'Материал', l: 1, f: function (x) {
-          var m = x.m;
-          return '<span class="in-ind" style="padding-left:' + (x.depth * 22) + 'px">' + ico(m.type_id) + ELW_INDUSTRY.cp(m.name) + '</span>' +
-            (m.build ? '<div class="in-sub" style="padding-left:' + (x.depth * 22 + 25) + 'px">строю: ' + L.fmtInt(m.build.runs) + ' прог. → ' + L.fmtInt(m.build.out) + ' шт.' + (m.build.out > m.qty ? ', останется ' + L.fmtInt(m.build.out - m.qty) : '') + '</div>' : '');
-        } },
-        { k: '', t: 'По чертежу', title: 'Сколько нужно без ME и бонусов: количество в чертеже × прогоны', f: function (x) { return '<span class="muted">' + esc(L.fmtInt(x.m.base * x.runs)) + '</span>'; } },
-        { k: '', t: 'Нужно', title: 'После ME, структуры и ригов', f: function (x) { return esc(L.fmtInt(x.qty)); } },
-        { k: '', t: 'Цена', f: function (x) { return x.m.build ? '<span class="muted">строю</span>' : esc(isk(x.price)); } },
-        { k: '', t: 'Купить за', f: function (x) { return x.m.build ? '<span class="muted">' + esc(isk(x.total)) + '</span>' : esc(isk(x.total)); } },
-        { k: '', t: 'Строю сам', f: function (x) {
-          return x.m.buildable ? '<input type="checkbox" data-build="' + x.m.type_id + '"' + (x.m.build ? ' checked' : '') + ' aria-label="Строить ' + esc(x.m.name) + ' самому">' +
-            (x.m.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') :
-            '<span class="in-sub" title="Для этого материала нет чертежа: его добывают, получают переработкой, на планетах или с NPC">не строится</span>';
-        } }
-      ], { rowAttrs: function (x) { return x.m.build ? ' class="in-built"' : ''; } }));
-
-    // работы
-    h += fold('c_jobs', 'Работы <span class="n">(' + r.jobs.length + ')</span>', table('inJobs', r.jobs, [
-      { k: 'name', t: 'Что', l: 1, f: function (j) { return '<span style="padding-left:' + (j.depth * 22) + 'px">' + ico(j.type_id) + ELW_INDUSTRY.cp(j.name) + '</span>' + (j.kind === 'r' ? ' <span class="in-sub">реакция</span>' : ''); } },
-      { k: 'runs', t: 'Прогонов', f: function (j) { return esc(L.fmtInt(j.runs)); } },
-      { k: 'out', t: 'Выйдет', f: function (j) { return esc(L.fmtInt(j.out)); } },
-      { k: 'time', t: 'Время', f: function (j) { return esc(dur(j.time)); } },
-      { k: 'eiv', t: 'EIV', title: HELP.c_eiv, f: function (j) { return esc(isk(j.eiv)); } },
-      { k: 'cost', t: 'Стоимость работы', title: HELP.c_cost, f: function (j) { return esc(isk(j.cost)); } }
-    ], {}));
-
-    // закупка
-    h += fold('c_buy', 'Что купить <span class="n">(' + r.shopping.length + ' поз. · ' + isk(t.materials) + ' ISK)</span>', table('inBuyList', r.shopping, [
-      { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + ELW_INDUSTRY.cp(x.name); } },
-      { k: 'qty', t: 'Количество', f: function (x) { return esc(L.fmtInt(x.qty)); } },
-      { k: 'price', t: 'Цена', f: function (x) { return esc(isk(x.price)); } },
-      { k: 'total', t: 'Сумма', f: function (x) { return esc(isk(x.total)); } },
-      { k: 'volume', t: 'Объём, м³', f: function (x) { return esc(L.fmtInt(x.volume)); } }
-    ], { sort: { k: 'total', d: -1 } }) +
-      '<div class="controls" style="margin-top:8px"><button type="button" class="btn" id="inCopy">Скопировать список покупок</button>' +
-      '<span class="small muted" id="inCopyMsg" role="status"></span></div>');
-    box.innerHTML = h + '</section>';
-  }
-
-  $('inResult').addEventListener('change', function (e) {
-    var cb = e.target.closest && e.target.closest('input[data-build]');
-    if (!cb) return;
-    var id = +cb.getAttribute('data-build');
-    I.build = I.build.filter(function (x) { return x !== id; });
-    if (cb.checked) I.build.push(id);
-    calc();
-  });
-  $('inResult').addEventListener('click', function (e) {
-    if (e.target.id === 'inBack') { setView('scan'); return; }
-    if (e.target.id === 'inPin' && I.res && ELW_INDUSTRY.projects) {
-      $('inPinMsg').textContent = 'Закрепляю…';
-      ELW_INDUSTRY.projects.pin(I.res.product.name, settings()).then(function (j) { if (!j.ok && $('inPinMsg')) $('inPinMsg').textContent = j.message; },
-        function () { $('inPinMsg').textContent = 'Нет связи с трекером.'; });
-      return;
-    }
-    if (e.target.id !== 'inCopy' || !I.res) return;
-    var text = I.res.shopping.map(function (x) { return x.name + ' ' + x.qty; }).join('\n'), msg = $('inCopyMsg');
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = 'Скопировано — вставляется в «Купить несколько» на рынке игры.'; }, function () { msg.textContent = 'Не удалось.'; });
-  });
 })(window.ELW);

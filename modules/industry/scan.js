@@ -32,7 +32,7 @@
     if (!box || SC.built) return;
     SC.built = true;
     box.innerHTML = '<section class="panel"><h2>Сканер прибыльности <span class="muted small">все чертежи хаба: что выгодно строить прямо сейчас</span></h2>' +
-      '<p class="small muted" style="margin-top:0">Считается один прогон каждого чертежа с вашими настройками (ME, TE, сооружение, налоги — на экране «Калькулятор») ' +
+      '<p class="small muted" style="margin-top:0">Считается один прогон каждого чертежа с вашими настройками (ME, TE, сооружение, налоги — «Ведение производства» → «Настройки по умолчанию») ' +
       'по ценам хаба. Стоимость работы — по индексу системы хаба. Нажмите на карточку — откроется подробный расчёт.</p>' +
       '<div class="in-chips" id="scHubs"></div><div id="scStatus" class="small" style="margin-top:8px"></div>' +
       ELW_INDUSTRY.fold('sc_filters', 'Сортировка, категории и фильтры', '<div class="in-chips" style="margin-top:6px"><span class="small muted">Сортировка</span><span id="scSorts" class="in-chips"></span>' +
@@ -59,7 +59,7 @@
     if (!b) return;
     if (b.classList.contains('sc-card')) { ELW_INDUSTRY.open(b.getAttribute('data-name'), b.getAttribute('data-src'), (SC.data.settings || {}).me, (SC.data.settings || {}).te); return; }
     if (b.id === 'scRefresh') { refresh(); return; }
-    if (b.id === 'scEdit') { $('inViewCalc').click(); return; }
+    if (b.id === 'scEdit') { ELW_INDUSTRY.show('proj'); if (ELW_INDUSTRY.projects) ELW_INDUSTRY.projects.defaults(); return; }
     if (b.hasAttribute('data-hub')) { SC.market = b.getAttribute('data-hub'); SC.page = 1; }
     else if (b.hasAttribute('data-sort')) { SC.sort = b.getAttribute('data-sort'); SC.page = 1; }
     else if (b.hasAttribute('data-mode')) { SC.mode = b.getAttribute('data-mode'); SC.page = 1; }

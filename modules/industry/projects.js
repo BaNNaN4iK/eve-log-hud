@@ -145,7 +145,11 @@
     var box = $('inProjView');
     if (!box || Q.built) return;
     Q.built = true;
-    box.innerHTML = '<div id="pjList"></div><div id="pjDetail"></div>';
+    box.innerHTML = '<div id="pjList"></div><section class="panel" id="pjDefaults" hidden>' +
+      ELW_INDUSTRY.fold('p_defaults', 'Настройки по умолчанию <span class="n">— для новых расчётов, сканера и плана: где строим, навыки, рынок</span>',
+        ELW_INDUSTRY.form('dfS', { runs: false }) + '<div class="controls" style="margin-top:8px"><button type="button" class="btn primary" id="dfSave">Сохранить</button>' +
+        '<span class="small" id="dfMsg" role="status" aria-live="polite"></span></div>', false) + '</section><div id="pjDetail"></div>';
+    ELW_INDUSTRY.defaults(function (st) { ELW_INDUSTRY.fillForm('dfS', st); });
   }
   function loadList() {
     if (Q.busy) return;
@@ -165,21 +169,34 @@
   }
   function remember() { try { if (Q.open) localStorage.setItem('elw.industry.project', Q.open); else localStorage.removeItem('elw.industry.project'); } catch (e) { } }
   function flash(t) { var m = $('pjMsg'); if (m) m.textContent = t || ''; }
-  function openProject(id) { Q.open = id; Q.d = null; Q.paste = false; remember(); $('pjList').innerHTML = ''; $('pjDetail').innerHTML = '<section class="panel"><p class="muted">Считаю…</p></section>'; loadDetail(); window.scrollTo(0, 0); }
+  function openProject(id) { Q.open = id; Q.d = null; Q.paste = false; Q.dirty = false; remember(); $('pjList').innerHTML = ''; $('pjDefaults').hidden = true; $('pjDetail').innerHTML = '<section class="panel"><p class="muted">Считаю…</p></section>'; loadDetail(); window.scrollTo(0, 0); }
   function closeProject() { Q.open = null; Q.d = null; remember(); $('pjDetail').innerHTML = ''; loadList(); }
+  function draft(name, over) {
+    shell();
+    Q.open = null; remember();
+    $('pjList').innerHTML = ''; $('pjDefaults').hidden = true;
+    $('pjDetail').innerHTML = '<section class="panel"><p class="muted">Считаю ' + esc(name) + '…</p></section>';
+    return post({ action: 'draft', product: name, settings: over || {} }).then(function (j) {
+      if (j.ok) openProject(j.id);
+      else { $('pjDetail').innerHTML = ''; loadList(); setTimeout(function () { flash(j.message); }, 300); }
+      return j;
+    }, function () { $('pjDetail').innerHTML = '<section class="panel"><p class="in-bad">Нет связи с трекером.</p></section>'; });
+  }
 
   // ---------- список ----------
   function drawList() {
     if (Q.open) return;
     var rows = Q.list || [];
-    var h = '<section class="panel"><h2>Ведение производства <span class="muted small">закреплённые чертежи: что есть на складе, что докупить, этапы, цены</span></h2>' +
+    $('pjDefaults').hidden = false;
+    var h = '<section class="panel"><h2>Ведение производства <span class="muted small">расчёт предмета, закреплённые чертежи и планы: склад, что докупить, этапы, цены</span></h2>' +
       '<div class="in-chips"><input id="pjNew" list="pjNewList" autocomplete="off" spellcheck="false" placeholder="Что строим — например: Vexor, Hobgoblin II" aria-label="Что закрепить" ' +
       'style="flex:1 1 260px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px"><datalist id="pjNewList"></datalist>' +
-      '<button type="button" class="btn primary" id="pjAdd">📌 Закрепить</button></div>' +
-      '<div class="small muted" style="margin-top:6px">Настройки (ME, TE, сооружение, риги, рынок) берутся из «Калькулятора». В калькуляторе тоже есть кнопка «Закрепить».</div>' +
+      '<button type="button" class="btn primary" id="pjCalc">Рассчитать</button><button type="button" class="btn" id="pjAdd">📌 Закрепить</button></div>' +
+      '<div class="small muted" style="margin-top:6px">«Рассчитать» — материалы, работы, себестоимость и прибыль без сохранения; понравилось — «Закрепить». ' +
+      'Настройки — «по умолчанию» (ниже), в проекте их можно поменять. План из нескольких продуктов закрепляется на экране «План производства».</div>' +
       '<div class="small" id="pjMsg" role="status" aria-live="polite" style="margin-top:6px"></div></section>';
     if (!rows.length) {
-      h += '<section class="panel"><p class="muted">' + (Q.list ? 'Закреплённых чертежей пока нет. Закрепите чертёж — и здесь будет видно, сколько материалов уже собрано, сколько осталось докупить и на сколько ISK, когда будет готово и сколько принесёт.' : 'Загружаю…') + '</p></section>';
+      h += '<section class="panel"><p class="muted">' + (Q.list ? 'Закреплённых чертежей пока нет. Рассчитайте предмет и закрепите его — и здесь будет видно, сколько материалов уже собрано, сколько осталось докупить и на сколько ISK, когда будет готово и сколько принесёт.' : 'Загружаю…') + '</p></section>';
     } else {
       var sum = { left: 0, profit: 0, building: 0 };
       rows.forEach(function (r) { sum.left += r.status === 'collect' && r.left_cost ? r.left_cost : 0; sum.profit += r.status !== 'done' && r.profit ? r.profit : 0; sum.building += r.status === 'building' ? 1 : 0; });
@@ -190,7 +207,7 @@
         var eta = r.status === 'building' && r.eta ? (r.eta * 1000 > Date.now() ? 'готово через ' + L.fmtDur(Math.round(r.eta - Date.now() / 1000)) : 'должно быть готово') : '';
         return '<div class="pj-card" tabindex="0" role="button" data-pj-open="' + esc(r.id) + '" aria-label="' + esc(r.name) + ': открыть">' +
           '<div class="pj-hd"><span class="sc-ico">' + ico(r.type_id) + '</span><div><div class="sc-name">' + esc(r.name) + '</div>' +
-          '<div class="sc-meta">' + (r.units ? L.fmtInt(r.units) + ' шт. · ' : '') + (r.runs || 1) + ' прог.' + (r.batches ? ' · партий ' + r.batches : '') + '</div></div>' +
+          '<div class="sc-meta">' + (r.kind === 'plan' ? 'план · ' + r.products + ' прод. · ' + L.fmtInt(r.units || 0) + ' шт.' : (r.units ? L.fmtInt(r.units) + ' шт. · ' : '') + (r.runs || 1) + ' прог.') + (r.batches ? ' · партий ' + r.batches : '') + '</div></div>' +
           '<span class="pj-st pj-' + r.status + '">' + esc(stepName(r.status)) + '</span></div>' +
           (r.error ? '<div class="small in-bad">' + esc(r.error) + '</div>' :
             '<div class="pj-prog"><div style="width:' + Math.min(100, r.progress || 0) + '%"></div></div>' +
@@ -211,14 +228,19 @@
     var p = d.project, c = d.calc, t = d.totals, s = c.settings, prod = c.product;
     Q.charts = {};
     var h = '<section class="panel"><button type="button" class="in-back" id="pjBack">← все производства</button>' +
-      '<h2>' + ico(prod.type_id) + esc(p.name) + ' <span class="muted small">' + L.fmtInt(prod.units) + ' шт. · ' + s.runs + ' прог. · ME ' + s.me + ' / TE ' + s.te + ' · ' + esc(c.market_name) + '</span></h2>' +
+      '<h2>' + ico(prod.type_id) + esc(p.name) + ' <span class="muted small">' + (c.kind === 'plan' ? 'план · ' + (c.products || []).length + ' прод. · ' + L.fmtInt(prod.units) + ' шт. · ' + (c.mode === 'buy' ? 'компоненты покупаю' : 'полный цикл') :
+        L.fmtInt(prod.units) + ' шт. · ' + s.runs + ' прог. · ME ' + s.me + ' / TE ' + s.te) + ' · ' + esc(c.market_name) + '</span></h2>' +
       '<div class="small" id="pjMsg" role="status" aria-live="polite"></div>';
     if (c.warning) h += '<p class="small in-bad">' + esc(c.warning) + '</p>';
     if (c.missing_price && c.missing_price.length) h += '<p class="small" style="color:var(--warn)">Нет цены на рынке: ' + esc(c.missing_price.join(', ')) + '</p>';
+    if (p.draft) {
+      h += '<div class="pj-draft"><div><b>Расчёт, не закреплён.</b> <span class="small muted">Закрепите — и можно вести склад, этапы, историю цен и партий.</span></div>' +
+        '<button type="button" class="btn primary" id="pjPin">📌 Закрепить</button></div>';
+    }
     // этапы
     var idx = STEPS.map(function (x) { return x[0]; }).indexOf(p.status);
-    h += '<ol class="pj-steps">' + STEPS.map(function (st, i) { return '<li class="' + (i < idx ? 'done' : i === idx ? 'now' : '') + '">' + st[1] + '</li>'; }).join('') + '</ol>';
-    h += '<div class="controls pj-actions">';
+    if (!p.draft) h += '<ol class="pj-steps">' + STEPS.map(function (st, i) { return '<li class="' + (i < idx ? 'done' : i === idx ? 'now' : '') + '">' + st[1] + '</li>'; }).join('') + '</ol>';
+    h += '<div class="controls pj-actions"' + (p.draft ? ' style="display:none"' : '') + '>';
     if (p.status === 'collect') {
       h += '<button type="button" class="btn primary" data-pj-status="building">Запустил производство</button>' +
         (t.progress < 100 ? '<span class="small muted">собрано ' + pct(t.progress) + ' — не хватает ' + (t.positions - t.ready) + ' поз. на ' + isk(t.left_cost) + ' ISK</span>' : '<span class="small in-good">Всё собрано — можно запускать.</span>');
@@ -242,7 +264,7 @@
       (d.raw ? tile('Сырьё собрано', pct(d.raw.totals.progress), 'если строить всё · докупить ' + isk(d.raw.totals.left_cost), d.raw.totals.progress >= 100 ? 'in-good' : '') : '') +
       tile('Себестоимость', isk(t.cost), 'за штуку ' + isk(t.per_unit)) +
       tile('Прибыль', isk(t.profit), t.margin !== null && t.margin !== undefined ? 'маржа ' + pct(t.margin) : '', cls(t.profit)) +
-      tile('Цена продукта', isk(prod.price), 'за штуку · ' + esc(c.market_name)) +
+      (c.kind === 'plan' ? tile('Выручка', isk(t.revenue), 'ROI ' + pct(t.roi)) : tile('Цена продукта', isk(prod.price), 'за штуку · ' + c.market_name)) +
       tile('Время', L.fmtDur(Math.round(t.top_time || 0)), t.jobs_total > 1 ? 'работ готово ' + t.jobs_done + ' из ' + t.jobs_total : '') + '</div>';
 
     // диаграммы
@@ -266,6 +288,36 @@
         '</div>');
     }
 
+    // план: продукты по отдельности
+    if (c.kind === 'plan' && c.products) {
+      h += fold('products', 'Продукты <span class="n">(' + c.products.length + ') · ROI ' + pct(t.roi) + '</span>', '<div class="tw"><table><thead><tr><th class="l">Продукт</th><th>Нужно</th><th>Выйдет</th><th>Время</th>' +
+        '<th>Себест./шт.</th><th>Выручка/шт.</th><th>Прибыль</th><th>Маржа</th><th>ROI</th></tr></thead><tbody>' + c.products.map(function (x) {
+          return '<tr class="' + (x.profit > 0 ? 'in-rgood' : x.profit < 0 ? 'in-rbad' : '') + '"><td class="l">' + ico(x.type_id) + ELW_INDUSTRY.cp(x.name) + '</td><td>' + esc(L.fmtInt(x.qty)) + '</td><td>' + esc(L.fmtInt(x.made)) + '</td>' +
+            '<td>' + esc(L.fmtDur(Math.round(x.time || 0))) + '</td><td>' + esc(isk(x.unit_cost)) + '</td><td>' + esc(isk(x.unit_net)) + '</td>' +
+            '<td class="' + cls(x.profit) + '">' + esc(isk(x.profit)) + '</td><td>' + esc(pct(x.margin)) + '</td><td>' + esc(pct(x.roi)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>');
+    }
+    // продукт: продажа своим ордером и мгновенно
+    if (c.kind !== 'plan' && c.compare) {
+      var col = function (title, x, color) {
+        var row = function (k, v, cl) { return '<dt' + (cl ? ' class="' + cl + '"' : '') + '>' + k + '</dt><dd' + (cl ? ' class="' + cl + '"' : '') + '>' + v + '</dd>'; };
+        return '<div style="--c:' + color + '"><h3>' + title + '</h3><dl>' + row('Цена продукта', isk(x.price)) + row('Выручка', isk(x.revenue)) +
+          row('Налоги и брокер', x.fees === null || x.fees === undefined ? '—' : '−' + isk(x.fees)) + row('Себестоимость', t.cost === null ? '—' : '−' + isk(t.cost)) +
+          row('Прибыль', '<span class="' + cls(x.profit) + '">' + isk(x.profit) + '</span>', 'tot') + row('ISK в час', isk(x.isk_hour)) + row('Маржа', pct(x.margin)) + '</dl></div>';
+      };
+      h += fold('cmp', 'Продажа: своим ордером и мгновенно', '<div class="in-cmp" style="margin-top:4px">' + col('Своим ордером', c.compare.sell || {}, 'var(--good)') + col('Мгновенно', c.compare.buy || {}, 'var(--accent)') + '</div>');
+    }
+    // продукт: дерево материалов — что строю сам
+    if (c.kind !== 'plan' && c.tree && c.tree.some(function (m) { return m.buildable; })) {
+      var nb = c.tree.filter(function (m) { return m.built; }).length;
+      h += fold('tree', 'Что строю сам <span class="n">— отмечено ' + nb + '; остальное покупается</span>', '<div class="tw"><table><thead><tr><th class="l">Материал</th><th>Нужно</th><th>Строю сам</th></tr></thead><tbody>' +
+        c.tree.map(function (m) {
+          return '<tr class="' + (m.built ? 'in-built' : '') + '"><td class="l"><span style="padding-left:' + (m.depth * 22) + 'px">' + ico(m.type_id) + ELW_INDUSTRY.cp(m.name) + '</span>' +
+            (m.built ? '<div class="in-sub" style="padding-left:' + (m.depth * 22 + 25) + 'px">' + L.fmtInt(m.runs) + ' прог. → ' + L.fmtInt(m.out) + ' шт.' + (m.out > m.qty ? ', останется ' + L.fmtInt(m.out - m.qty) : '') + '</div>' : '') + '</td>' +
+            '<td>' + esc(L.fmtInt(m.qty)) + '</td><td>' + (m.buildable ? '<input type="checkbox" data-pj-build="' + m.type_id + '"' + (m.built ? ' checked' : '') + ' aria-label="Строить ' + esc(m.name) + ' самому">' + (m.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') :
+              '<span class="in-sub" title="Для этого материала нет чертежа: его добывают, получают переработкой, на планетах или с NPC">не строится</span>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>');
+    }
     // материалы (что покупаем по плану) и сырьё (если строить всё самому)
     function matTable(list, fkey) {
       var f = Q[fkey] || 'all';
@@ -320,8 +372,10 @@
         }).join('') + '</tbody></table></div>');
     }
 
-    // цена продукта за 90 дней
+    // цена продукта за 90 дней (в плане — выбранного продукта)
     var ser = d.series || [];
+    var pick = c.kind === 'plan' && c.products && c.products.length > 1 ? '<div class="in-chips" style="margin:2px 0 6px">' + c.products.map(function (x) {
+      return '<button type="button" class="in-chip' + (x.type_id === d.series_tid ? ' on' : '') + '" data-pj-tid="' + x.type_id + '">' + esc(x.name) + '</button>'; }).join('') + '</div>' : '';
     if (ser.length > 1) {
       var ts = function (dt) { return Date.parse(dt + 'T00:00:00Z') / 1000; };
       var avg = ser.map(function (r) { return [ts(r[0]), r[1]]; });
@@ -330,11 +384,11 @@
       var stats = '<div class="pj-stats"><span>средняя за 90 дн. <b>' + isk(ser.reduce(function (a, r) { return a + r[1]; }, 0) / ser.length) + '</b></span>' +
         '<span>за 30 дн. <b class="' + cls(lastP - prev) + '">' + (prev ? (lastP >= prev ? '+' : '') + pct(100 * (lastP - prev) / prev) : '—') + '</b></span>' +
         '<span>продаётся в день <b>≈ ' + L.fmtInt(Math.round(vol30)) + '</b></span>' +
-        (t.per_unit ? '<span>ваша себестоимость <b>' + isk(t.per_unit) + '</b></span>' : '') + '</div>';
-      h += fold('price', 'Цена продукта за ' + ser.length + ' дн. <span class="n">— ' + esc(c.market_name.replace(' 4-4', '')) + ', регион</span>', stats +
+        (unitCost(c, t, d.series_tid) ? '<span>ваша себестоимость <b>' + isk(unitCost(c, t, d.series_tid)) + '</b></span>' : '') + '</div>';
+      h += fold('price', 'Цена ' + (c.kind === 'plan' ? 'продукта' : 'продукта') + ' — ' + ser.length + ' дн. с торгами <span class="n">— ' + esc(c.market_name.replace(' 4-4', '')) + ', регион</span>', pick + stats +
         lines('pjPrice', { label: 'Цена продукта по дням', h: 230, series: [
           { name: 'средняя цена', c: 'var(--accent)', pts: avg, lo: ser.map(function (r) { return [ts(r[0]), r[2]]; }), hi: ser.map(function (r) { return [ts(r[0]), r[3]]; }) },
-          { name: 'себестоимость штуки', c: 'var(--warn)', dash: true, pts: t.per_unit ? [[avg[0][0], t.per_unit], [avg[avg.length - 1][0], t.per_unit]] : [] }
+          { name: 'себестоимость штуки', c: 'var(--warn)', dash: true, pts: unitCost(c, t, d.series_tid) ? [[avg[0][0], unitCost(c, t, d.series_tid)], [avg[avg.length - 1][0], unitCost(c, t, d.series_tid)]] : [] }
         ], bars: ser.map(function (r) { return [ts(r[0]), r[4]]; }), barsName: 'продано за день',
           xfmt: function (x, full) { var dd = new Date(x * 1000); return ('0' + dd.getUTCDate()).slice(-2) + '.' + ('0' + (dd.getUTCMonth() + 1)).slice(-2) + (full ? '.' + dd.getUTCFullYear() : ''); } }) +
         '<div class="small muted">Полоса — разброс цен за день (мин–макс), столбики — сколько продано. Пунктир — ваша себестоимость: всё, что выше, — прибыль.</div>');
@@ -365,19 +419,25 @@
         }).join('') + '</tbody></table></div>');
     }
     // настройки и журнал
-    h += fold('set', 'Настройки проекта', '<div class="in-grid">' +
-      '<label class="small muted">Название<input id="pjName" maxlength="80" value="' + esc(p.name) + '"></label>' +
-      '<label class="small muted">Прогонов<input id="pjRuns" inputmode="numeric" value="' + s.runs + '"></label>' +
-      '<label class="small muted">ME<input id="pjMe" inputmode="numeric" value="' + s.me + '"></label>' +
-      '<label class="small muted">TE<input id="pjTe" inputmode="numeric" value="' + s.te + '"></label></div>' +
-      '<div class="controls" style="margin-top:8px"><button type="button" class="btn primary" id="pjSaveSet">Сохранить</button>' +
-      '<button type="button" class="btn" id="pjCalc">Открыть в калькуляторе</button><span style="flex:1"></span>' +
-      '<button type="button" class="btn" id="pjDel" style="color:var(--bad)">Открепить</button></div>' +
-      '<div class="small muted" style="margin-top:6px">Сооружение, риги, навыки и рынок — как были в калькуляторе при закреплении.</div>', false);
+    h += fold('set', 'Настройки расчёта <span class="n">— прогоны, ME/TE, где строим, навыки, рынок</span>', '<div id="pjSetBox">' +
+      '<div class="in-grid"><label class="small muted">Название<input id="pjName" maxlength="80" value="' + esc(p.name) + '"></label>' +
+      (c.kind === 'plan' ? '<label class="small muted">Как строим' + ELW_INDUSTRY.help('pl_mode') + '<select id="pjMode"><option value="full"' + (c.mode !== 'buy' ? ' selected' : '') + '>полный цикл</option>' +
+        '<option value="buy"' + (c.mode === 'buy' ? ' selected' : '') + '>покупаю компоненты</option></select></label>' : '') + '</div>' +
+      ELW_INDUSTRY.form('pjS', c.kind === 'plan' ? { runs: false, me: false } : {}) +
+      '<div class="controls" style="margin-top:8px"><button type="button" class="btn primary" id="pjSaveSet">Пересчитать</button>' +
+      '<label class="small muted"><input type="checkbox" id="pjAsDef"> и сделать настройками по умолчанию (кроме прогонов и ME/TE)</label><span style="flex:1"></span>' +
+      '<button type="button" class="btn" id="pjDel" style="color:var(--bad)">' + (p.draft ? 'Закрыть расчёт' : 'Открепить') + '</button></div></div>', !p.draft ? false : true);
     h += fold('log', 'Журнал <span class="n">(' + (p.log || []).length + ')</span>', '<ul class="pj-log">' + (p.log || []).slice().reverse().map(function (x) {
       return '<li><span class="muted">' + esc(L.fmtDateTime(x[0])) + '</span> ' + esc(x[1]) + '</li>'; }).join('') + '</ul>', false);
     box.innerHTML = h + '</section>';
+    if ($('pjSetBox')) ELW_INDUSTRY.fillForm('pjS', s);
+    Q.dirty = false;
     Object.keys(Q.charts).forEach(drawLines);
+  }
+  function unitCost(c, t, tid) {
+    if (c.kind !== 'plan') return t.per_unit;
+    var x = (c.products || []).filter(function (q) { return q.type_id === tid; })[0];
+    return x ? x.unit_cost : null;
   }
   function tickEta() {                                         // обратный отсчёт без полной перерисовки
     var d = Q.d, el = $('pjEta');
@@ -399,7 +459,7 @@
     }, function () { flash('Нет связи с трекером.'); });
   }
   function pin(product, settings) {
-    return post({ action: 'create', product: product, settings: settings }).then(function (j) {
+    return post({ action: 'create', product: product, settings: settings || {} }).then(function (j) {
       if (j.ok) { ELW_INDUSTRY.show('proj'); openProject(j.id); }
       return j;
     });
@@ -410,11 +470,26 @@
     var el = e.target.closest('[data-pj-open]');
     if (el) { openProject(el.getAttribute('data-pj-open')); return; }
     if (e.target.id === 'pjBack') { closeProject(); return; }
-    if (e.target.id === 'pjAdd') {
+    if (e.target.id === 'pjAdd' || e.target.id === 'pjCalc') {
       var name = $('pjNew').value.trim();
       if (!name) { flash('Впишите, что строим.'); return; }
+      if (e.target.id === 'pjCalc') { draft(name); return; }
       flash('Закрепляю…');
-      pin(name, ELW_INDUSTRY.settings()).then(function (j) { if (!j.ok) flash(j.message); }, function () { flash('Нет связи с трекером.'); });
+      pin(name, {}).then(function (j) { if (!j.ok) flash(j.message); }, function () { flash('Нет связи с трекером.'); });
+      return;
+    }
+    if (e.target.id === 'dfSave') {
+      $('dfMsg').textContent = 'Сохраняю…';
+      ELW_INDUSTRY.saveDefaults(ELW_INDUSTRY.readForm('dfS')).then(function (j) {
+        $('dfMsg').textContent = j.ok ? 'Сохранено. Новые расчёты, сканер и план считают с этими настройками.' : (j.message || 'Не получилось.');
+        if (j.ok) ELW_INDUSTRY.fillForm('dfS', j.settings);
+      }, function () { $('dfMsg').textContent = 'Нет связи с трекером.'; });
+      return;
+    }
+    var tidb = e.target.closest('[data-pj-tid]');
+    if (tidb && Q.d) {
+      var want = +tidb.getAttribute('data-pj-tid');
+      api('/api/industry/project?id=' + encodeURIComponent(Q.d.project.id) + '&tid=' + want).then(function (j) { if (j.ok && Q.d) { Q.d = j; drawDetail(); } });
       return;
     }
     var f = e.target.closest('[data-pj-filter]');
@@ -454,11 +529,17 @@
       return;
     }
     if (e.target.id === 'pjSaveSet') {
-      act({ action: 'settings', id: id, name: $('pjName').value, settings: { runs: num($('pjRuns').value), me: num($('pjMe').value), te: num($('pjTe').value) } }, 'Сохранено.', true);
+      var st = ELW_INDUSTRY.readForm('pjS');
+      st.build = Q.d.calc.settings.build || [];
+      act({ action: 'settings', id: id, name: $('pjName').value, settings: st, mode: $('pjMode') ? $('pjMode').value : undefined,
+        as_default: $('pjAsDef').checked }, 'Пересчитано.', true);
       return;
     }
-    if (e.target.id === 'pjCalc') { ELW_INDUSTRY.open(Q.d.calc.product.name, null, Q.d.calc.settings.me, Q.d.calc.settings.te); return; }
-    if (e.target.id === 'pjDel') { if (confirm('Открепить «' + Q.d.project.name + '»? Склад и история проекта будут удалены.')) act({ action: 'delete', id: id }); }
+    if (e.target.id === 'pjPin') { act({ action: 'pin', id: id }, 'Закреплено — теперь можно вести склад и этапы.'); return; }
+    if (e.target.id === 'pjDel') {
+      if (Q.d.project.draft) { act({ action: 'delete', id: id }); return; }
+      if (confirm('Открепить «' + Q.d.project.name + '»? Склад и история проекта будут удалены.')) act({ action: 'delete', id: id });
+    }
   });
   document.addEventListener('keydown', function (e) {
     var view = $('inProjView');
@@ -478,6 +559,9 @@
       act({ action: 'have', id: Q.d.project.id, have: have }, 'Сохранено.');
       return;
     }
+    var bld = e.target.closest('[data-pj-build]');
+    if (bld) { act({ action: 'build', id: Q.d.project.id, type_id: +bld.getAttribute('data-pj-build'), on: bld.checked }, bld.checked ? 'Строю сам — пересчитано.' : 'Покупаю — пересчитано.', true); return; }
+    if (e.target.closest('#pjSetBox')) { Q.dirty = true; return; }
     var job = e.target.closest('[data-pj-job]');
     if (job) act({ action: 'job', id: Q.d.project.id, key: job.getAttribute('data-pj-job'), done: job.checked });
   });
@@ -498,13 +582,26 @@
   window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
   ELW_INDUSTRY.projects = {
     pin: pin,
+    draft: draft,
+    defaults: function () {                                   // открыть «Настройки по умолчанию» (из сканера и плана)
+      shell();
+      if (Q.open) closeProject();
+      var d = document.querySelector('[data-fold="p_defaults"]');
+      if (d) { d.open = true; setTimeout(function () { d.scrollIntoView({ block: 'start' }); }, 50); }
+    },
+    plan: function (items, mode, name) {                     // «План производства» → закрепить весь план
+      return post({ action: 'create', items: items, mode: mode, name: name }).then(function (j) {
+        if (j.ok) { ELW_INDUSTRY.show('proj'); openProject(j.id); }
+        return j;
+      });
+    },
     render: function (force) {                               // ядро зовёт каждые 4 с: перерисовка только по делу
       shell();
       var busyInput = document.activeElement && $('inProjView').contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
       if (Q.open) {
         if (!Q.d || force) { if (!Q.d) loadDetail(); else loadDetail(false); return; }
         tickEta();
-        if (!busyInput && !Q.paste && Date.now() - Q.loaded > 120000) loadDetail(false);      // цены обновляются раз в пару минут
+        if (!busyInput && !Q.paste && !Q.dirty && Date.now() - Q.loaded > 120000) loadDetail(false);      // цены обновляются раз в пару минут
         return;
       }
       if (!Q.list || force || (!busyInput && Date.now() - Q.loaded > 120000)) loadList();

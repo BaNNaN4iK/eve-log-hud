@@ -985,6 +985,76 @@ def parse_stock(text: str) -> List[Tuple[str, int]]:
     return [(n, got[n.casefold()]) for n in order]
 
 
+def parse_fit(text: str) -> Tuple[str, List[Tuple[str, int]]]:
+    """Фит в формате EFT (кнопка «Копировать» в фитинге игры, Pyfa): «[Корабль, Название]», модули построчно,
+    «Hammerhead II x5» — дроны и груз. Заряд в модуле («Модуль, Заряд») не считается — патроны берутся из строк груза.
+    Возвращает (корабль, [(название, штук)])."""
+    ship, out = "", []
+    for raw in (text or "").splitlines()[:600]:
+        line = raw.strip()
+        if not line:
+            continue
+        m = re.match(r"^\[(.+?)(?:,\s*(.*))?\]$", line)
+        if m:
+            if not ship and not re.match(r"(?i)^(empty|пуст)", m.group(1)):
+                ship = m.group(1).strip()
+                out.append((ship, 1))
+            continue                                              # «[Empty High slot]» и т. п.
+        line = re.sub(r"(?i)\s*/\s*(offline|выкл\w*)$", "", line)
+        if "," in line and not re.search(r"\s[xх×]\s*\d+$", line):
+            line = line.split(",")[0].strip()                     # модуль с зарядом — берём модуль
+        q = re.match(r"^(.+?)\s+[xх×]\s*(\d[\d\s\u00a0]*)$", line)
+        name, qty = (q.group(1).strip(), _qty(q.group(2)) or 1) if q else (line, 1)
+        out.append((name, qty))
+    merged: Dict[str, int] = {}
+    order: List[str] = []
+    for n, q in out:
+        k = n.casefold()
+        if k not in merged:
+            merged[k] = 0
+            order.append(n)
+        merged[k] += q
+    return ship, [(n, merged[n.casefold()]) for n in order]
+
+
+def fit_items(calc: "Calculator", text: str, count: int = 1) -> dict:
+    """Фит → продукты для плана: что строится по чертежу; остальное — «купить» (нет чертежа) или «не узнал»."""
+    ship, rows = parse_fit(text)
+    if not rows:
+        raise ValueError("Не нашёл фит. В игре: окно фитинга → «Копировать в буфер обмена» (или Pyfa → Export → EFT), вставьте сюда.")
+    count = max(1, min(int(count or 1), 1000))
+    types = calc.data["types"]
+    index = getattr(calc, "_all_names", None)
+    if index is None:
+        index = calc._all_names = {v[0].casefold(): int(k) for k, v in types.items()}
+    ids: Dict[str, int] = {}
+    unknown = []
+    for n, _ in rows:
+        tid = index.get(n.casefold())
+        if tid is None:
+            unknown.append(n)
+        else:
+            ids[n.casefold()] = tid
+    if unknown and calc.esi is not None:                        # русский клиент — русские названия
+        try:
+            res, _ = calc.esi("/universe/ids/", "POST", unknown[:500], language="ru")
+            for e in (res or {}).get("inventory_types") or []:
+                ids[e["name"].casefold()] = int(e["id"])
+        except Exception:
+            pass
+    items, buy, skipped = [], [], []
+    for n, q in rows:
+        tid = ids.get(n.casefold())
+        if tid is None:
+            skipped.append({"name": n, "qty": q * count})
+        elif str(tid) in calc.data["bp"]:
+            items.append({"id": tid, "name": calc.name(tid), "qty": q * count})
+        else:
+            buy.append({"id": tid, "name": calc.name(tid) if str(tid) in types else n, "qty": q * count})
+    return {"ship": calc.name(ids[ship.casefold()]) if ship and ship.casefold() in ids else ship, "count": count,
+            "items": items, "buy": buy, "skipped": skipped}
+
+
 class Projects:
     """Закреплённые чертежи: настройки расчёта, сколько материалов уже есть, ход работ и снимки цен."""
 
@@ -1015,21 +1085,38 @@ class Projects:
     def get(self, pid: str) -> Optional[dict]:
         return next((p for p in self.items if p.get("id") == pid), None)
 
-    def create(self, product: str, settings: Optional[dict], name: str = "", now: Optional[float] = None) -> dict:
+    def create(self, product: str, settings: Optional[dict], name: str = "", now: Optional[float] = None, draft: bool = False,
+               items: Optional[List[Tuple[int, int]]] = None, mode: str = "full") -> dict:
+        """Новый проект: один продукт (как калькулятор) или план из нескольких продуктов (items). draft — черновик:
+        расчёт без закрепления, в списке не виден, хранится один (новый черновик заменяет прежний)."""
         now = time.time() if now is None else now
-        tid = self.calc.find(product)
-        if tid is None or str(tid) not in self.calc.data["bp"]:
-            raise ValueError("Не нашёл, что строить — выберите из подсказки.")
-        if len(self.items) >= PROJECT_MAX:
-            raise ValueError(f"Закреплено уже {PROJECT_MAX} чертежей — удалите ненужные.")
-        s = clean_settings(settings)
+        bp = self.calc.data["bp"]
+        if items:
+            items = [(int(t), int(q)) for t, q in items if str(t) in bp and q > 0][:60]
+            if not items:
+                raise ValueError("В плане нет продуктов.")
+            tid, kind = items[0][0], "plan"
+            title = (name or "").strip()[:80] or "План: " + ", ".join(self.calc.name(t) for t, _ in items[:3]) + ("…" if len(items) > 3 else "")
+        else:
+            tid, kind = self.calc.find(product), "item"
+            if tid is None or str(tid) not in bp:
+                raise ValueError("Не нашёл, что строить — выберите из подсказки.")
+            title = (name or "").strip()[:80] or self.calc.name(tid)
+        if not draft and sum(1 for p in self.items if not p.get("draft")) >= PROJECT_MAX:
+            raise ValueError(f"Закреплено уже {PROJECT_MAX} проектов — удалите ненужные.")
         pid = f"{int(now * 1000):x}"
         while self.get(pid):
             pid += "a"
-        p = {"id": pid, "type_id": tid, "product": self.calc.name(tid), "name": (name or "").strip()[:80] or self.calc.name(tid),
-             "settings": s, "have": {}, "jobs_done": [], "status": "collect", "created": int(now), "started": None,
-             "finished": None, "snaps": [], "batches": [], "log": [[int(now), "Чертёж закреплён"]]}
+        p = {"id": pid, "kind": kind, "type_id": tid, "product": self.calc.name(tid) if kind == "item" else title, "name": title,
+             "settings": clean_settings(settings), "have": {}, "jobs_done": [], "status": "collect", "created": int(now), "started": None,
+             "finished": None, "snaps": [], "batches": [], "draft": bool(draft),
+             "log": [[int(now), "Черновик расчёта" if draft else ("План закреплён" if kind == "plan" else "Чертёж закреплён")]]}
+        if kind == "plan":
+            p["items"] = [{"id": t, "qty": q} for t, q in items]
+            p["mode"] = "buy" if mode == "buy" else "full"
         with self.lock:
+            if draft:
+                self.items = [x for x in self.items if not x.get("draft")]
             self.items.insert(0, p)
         self.save()
         return p
@@ -1037,29 +1124,96 @@ class Projects:
     def _log(self, p: dict, text: str, now: float) -> None:
         p["log"] = (p.get("log") or [])[-99:] + [[int(now), text[:200]]]
 
+    def pin(self, p: dict, now: Optional[float] = None) -> None:
+        now = time.time() if now is None else now
+        if not p.get("draft"):
+            return
+        if sum(1 for x in self.items if not x.get("draft")) >= PROJECT_MAX:
+            raise ValueError(f"Закреплено уже {PROJECT_MAX} проектов — удалите ненужные.")
+        p["draft"] = False
+        p["created"] = int(now)
+        self._log(p, "Закреплено", now)
+        self.save()
+
+    def set_build(self, p: dict, tid: int, on: bool) -> None:
+        """«Строю сам» для компонента (проект с одним продуктом)."""
+        b = set(p["settings"].get("build") or [])
+        (b.add if on else b.discard)(int(tid))
+        p["settings"] = clean_settings(dict(p["settings"], build=sorted(b)))
+        self.save()
+
+    def _engine(self, p: dict, now: float, settings: Optional[dict] = None, mode: Optional[str] = None) -> dict:
+        """Расчёт проекта в одном виде для обоих видов: продукт (калькулятор) и план (несколько продуктов)."""
+        s = clean_settings(settings if settings is not None else p["settings"])
+        if p.get("kind") != "plan":
+            res = self.calc.calculate(str(p["type_id"]), s, now)
+            if not res.get("ok"):
+                return res
+            tree = []
+
+            def walk(node, depth):
+                for m in node["materials"]:
+                    tree.append({"type_id": m["type_id"], "name": m["name"], "qty": m["qty"], "depth": depth, "buildable": m["buildable"],
+                                 "built": "build" in m, "kind": m.get("kind", ""),
+                                 "runs": m["build"]["runs"] if "build" in m else None, "out": m["build"]["out"] if "build" in m else None})
+                    if "build" in m:
+                        walk(m["build"], depth + 1)
+            walk(res["tree"], 0)
+            jobs = [dict(j, key=f"{j['type_id']}:{j['depth']}") for j in res["jobs"]]
+            sm = s.get("sell_mode") if s.get("sell_mode") in ("sell", "buy") else "sell"
+            cs = (res.get("compare") or {}).get(sm) or {}
+            t = res["totals"]
+            return {"ok": True, "kind": "item", "res": res, "shopping": res["shopping"], "jobs": jobs, "prices": res["prices"],
+                    "product": res["product"], "settings": res["settings"], "market_name": res["market_name"],
+                    "extra": {"warning": res["warning"], "cost_index": res["cost_index"], "system": res["system"],
+                              "missing_price": res["missing_price"], "compare": res["compare"], "tree": tree},
+                    "totals": {"cost": t["cost"], "per_unit": t["per_unit"], "materials": t["materials"], "jobs": t["jobs"],
+                               "revenue": cs.get("revenue"), "fees": cs.get("fees"), "profit": cs.get("profit"), "margin": cs.get("margin"),
+                               "isk_hour": cs.get("isk_hour"), "time": t["time"], "top_time": t["top_time"], "volume": t["volume"]}}
+        items = [(int(i["id"]), int(i["qty"])) for i in p.get("items") or []]
+        res = plan_with_products(self.calc, items, s, mode or p.get("mode", "full"), now)
+        t = res["totals"]
+        units = sum(q for _, q in items) or 1
+        gross = sum((pr["price"] or 0) * pr["qty"] for pr in res["products"]) if res["prices"] else None
+        jobs = [{"type_id": j["type_id"], "name": j["name"], "kind": j["kind"], "runs": j["runs"], "out": j["made"], "time": j["time"],
+                 "cost": j["cost"], "eiv": j.get("eiv"), "depth": 0 if j["top"] else 1, "key": f"{j['type_id']}:{'p' if j['top'] else 'c'}"}
+                for j in res["jobs"]]
+        jobs.sort(key=lambda j: (j["depth"], j["name"]))
+        tops = [j["time"] for j in jobs if j["depth"] == 0]
+        first = res["products"][0] if res["products"] else {"type_id": p["type_id"], "name": p["name"], "price": None}
+        return {"ok": True, "kind": "plan", "res": res, "shopping": res["shopping"], "jobs": jobs, "prices": res["prices"],
+                "product": {"type_id": first["type_id"], "name": p["name"], "units": units, "price": None, "kind": "m"},
+                "settings": s, "market_name": MARKETS[s["market"]][0],
+                "extra": {"warning": "", "cost_index": None, "system": "", "missing_price": res["no_price"], "compare": None,
+                          "products": res["products"], "invention": res["invention"], "leftovers": res["leftovers"],
+                          "mode": res["mode"], "plan_totals": t},
+                "totals": {"cost": t["cost"], "per_unit": t["cost"] / units if t["cost"] is not None else None,
+                           "materials": t["buy"], "jobs": (t["jobs"] or 0) + (t["invention"] or 0), "revenue": gross,
+                           "fees": gross - t["revenue"] if gross is not None and t["revenue"] is not None else None,
+                           "profit": t["profit"], "margin": round(t["profit"] * 100 / gross, 1) if t["profit"] is not None and gross else None,
+                           "isk_hour": t["profit"] / (t["time"] / 3600) if t["profit"] is not None and t["time"] else None,
+                           "time": t["time"], "top_time": max(tops) if tops else 0, "volume": t["volume"], "roi": t["roi"]}}
+
     def raw(self, p: dict, now: float) -> Optional[dict]:
         """Сырьё: если строить самому все компоненты (производство; продукты реакций покупаются), — сколько каких материалов нужно.
         None — строить нечего: закупка и так состоит из сырья."""
         bp = self.calc.data["bp"]
-        res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
-        if not res.get("ok") or not any(bp.get(str(r["type_id"]), [0, ""])[1] == "m" for r in res["shopping"]):
+        if p.get("kind") == "plan":                               # план «покупаю компоненты» → полный цикл
+            if p.get("mode") == "full":
+                return None
+            e = self._engine(p, now, mode="full")
+            return e if e.get("ok") else None
+        e = self._engine(p, now)
+        if not e.get("ok") or not any(bp.get(str(r["type_id"]), [0, ""])[1] == "m" for r in e["shopping"]):
             return None
         build = set(p["settings"].get("build") or [])
         for _ in range(8):                                       # раскрываем дерево слой за слоем
-            found = set()
-
-            def walk(node):
-                for m in node["materials"]:
-                    if "build" in m:
-                        walk(m["build"])
-                    elif m.get("buildable") and m.get("kind") == "m":   # реакции не раскрываем: их продукты покупают
-                        found.add(m["type_id"])
-            walk(res["tree"])
+            found = {m["type_id"] for m in e["extra"]["tree"] if not m["built"] and m["buildable"] and m["kind"] == "m"}
             if not found - build:
                 break
             build |= found
-            res = self.calc.calculate(str(p["type_id"]), dict(p["settings"], build=sorted(build)), now)
-        return res
+            e = self._engine(p, now, settings=dict(p["settings"], build=sorted(build)))
+        return e
 
     def _rows(self, shopping: list, have: dict) -> Tuple[list, dict]:
         rows, need_cost, have_cost, left_cost, left_vol, ready = [], 0.0, 0.0, 0.0, 0.0, 0
@@ -1087,14 +1241,12 @@ class Projects:
     def detail(self, p: dict, now: Optional[float] = None, snap: bool = True, with_raw: bool = True) -> dict:
         """Расчёт проекта: материалы (нужно / есть / осталось / докупить), работы, итоги, время."""
         now = time.time() if now is None else now
-        res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
-        if not res.get("ok"):
-            return res
+        e = self._engine(p, now)
+        if not e.get("ok"):
+            return e
         have = p.get("have") or {}
-        priced = res.get("prices")
-        mats, mt = self._rows(res["shopping"], have)
-        need_cost, have_cost, left_cost, left_vol, ready = mt["need_cost"], mt["have_cost"], mt["left_cost"], mt["left_volume"], mt["ready"]
-        progress_value = mt["progress"] if priced else mt["progress_qty"]
+        priced = e["prices"]
+        mats, mt = self._rows(e["shopping"], have)
         raw = None
         if with_raw:
             rr = self.raw(p, now)
@@ -1113,36 +1265,29 @@ class Projects:
                                                          minerals=dict(mt2, progress=mt2["progress"] if priced else mt2["progress_qty"]) if mins else None),
                        "jobs": len(rr["jobs"])}
         done = set(p.get("jobs_done") or [])
-        jobs = []
-        for i, j in enumerate(res["jobs"]):
-            key = f"{j['type_id']}:{j['depth']}"
-            jobs.append(dict(j, key=key, done=key in done))
-        t = res["totals"]
-        cs = (res.get("compare") or {}).get(p["settings"].get("sell_mode") if p["settings"].get("sell_mode") in ("sell", "buy") else "sell") or {}
-        # ход работ: главная работа запущена — когда будет готово
-        eta = None
+        jobs = [dict(j, done=j["key"] in done) for j in e["jobs"]]
+        t = e["totals"]
+        eta = None                                               # ход работ: главная работа запущена — когда будет готово
         if p.get("status") == "building" and p.get("started"):
-            left_jobs = sum(j["time"] for j in jobs if not j["done"] and j["depth"] > 0)
-            eta = p["started"] + (t.get("top_time") or 0) + left_jobs
+            eta = p["started"] + (t.get("top_time") or 0) + sum(j["time"] for j in jobs if not j["done"] and j["depth"] > 0)
         out = {
-            "ok": True, "project": {k: v for k, v in p.items() if k not in ("snaps",)}, "calc": {
-                "product": res["product"], "settings": res["settings"], "market_name": res["market_name"], "warning": res["warning"],
-                "cost_index": res["cost_index"], "system": res["system"], "missing_price": res["missing_price"], "compare": res["compare"]},
+            "ok": True, "project": {k: v for k, v in p.items() if k not in ("snaps",)},
+            "calc": dict(e["extra"], kind=e["kind"], product=e["product"], settings=e["settings"], market_name=e["market_name"]),
             "materials": mats, "jobs": jobs, "prices": priced,
-            "totals": dict(t, need_cost=need_cost if priced else None, have_cost=have_cost if priced else None,
-                           left_cost=left_cost if priced else None, left_volume=left_vol, progress=progress_value,
-                           ready=ready, positions=len(mats), jobs_done=sum(1 for j in jobs if j["done"]), jobs_total=len(jobs),
-                           # прибыль, если докупить недостающее; уже купленное — по рыночной цене (могли бы продать)
-                           profit=cs.get("profit"), margin=cs.get("margin"), revenue=cs.get("revenue"), fees=cs.get("fees"),
-                           isk_hour=cs.get("isk_hour")),
+            "totals": dict(t, need_cost=mt["need_cost"] if priced else None, have_cost=mt["have_cost"] if priced else None,
+                           left_cost=mt["left_cost"] if priced else None, left_volume=mt["left_volume"],
+                           progress=mt["progress"] if priced else mt["progress_qty"], ready=mt["ready"], positions=len(mats),
+                           jobs_done=sum(1 for j in jobs if j["done"]), jobs_total=len(jobs)),
             "eta": eta, "now": int(now), "snaps": p.get("snaps") or [], "raw": raw,
         }
-        if snap and priced and t.get("cost") is not None:
+        if snap and priced and t.get("cost") is not None and not p.get("draft"):
             snaps = p.get("snaps") or []
             if not snaps or now - snaps[-1][0] >= PROJECT_SNAP:
-                p["snaps"] = (p.get("snaps") or [])[-(PROJECT_SNAPS - 1):] + [[int(now), round(t["cost"], 2),
-                                                                             round(t["per_unit"] or 0, 2),
-                                                                             res["product"]["price"], round(left_cost, 2)]]
+                price = e["product"]["price"]
+                if e["kind"] == "plan" and t.get("revenue"):
+                    price = t["revenue"] / (e["product"]["units"] or 1)
+                p["snaps"] = snaps[-(PROJECT_SNAPS - 1):] + [[int(now), round(t["cost"], 2), round(t["per_unit"] or 0, 2), price,
+                                                              round(mt["left_cost"], 2)]]
                 out["snaps"] = p["snaps"]
                 self.save()
         return out
@@ -1153,6 +1298,7 @@ class Projects:
         except Exception as e:                                  # нет сети и т. п. — карточка без цифр
             d = {"ok": False, "message": str(e)}
         base = {"id": p["id"], "name": p["name"], "product": p["product"], "type_id": p["type_id"], "status": p["status"],
+                "kind": p.get("kind", "item"), "products": len(p.get("items") or []) or 1,
                 "runs": p["settings"].get("runs"), "created": p["created"], "started": p.get("started"),
                 "batches": len(p.get("batches") or [])}
         if not d.get("ok"):
@@ -1198,7 +1344,7 @@ class Projects:
         rows = parse_stock(text)
         if not rows:
             raise ValueError("Не нашёл ни одной строки с предметом. Скопируйте предметы в игре (Ctrl+A, Ctrl+C) и вставьте сюда.")
-        res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
+        res = self._engine(p, now)
         if not res.get("ok"):
             raise ValueError(res.get("message") or "Расчёт не удался")
         shop = list(res["shopping"])
@@ -1510,7 +1656,7 @@ def setup(ctx) -> None:
             threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in list(ids)[:120]], name="industry-icons", daemon=True).start()
 
     def projects_list(qs):
-        rows = [projects.summary(p) for p in list(projects.items)]
+        rows = [projects.summary(p) for p in list(projects.items) if not p.get("draft")]
         icons([r["type_id"] for r in rows])
         return {"ok": True, "projects": rows, "prices": ctx.online is not None}
 
@@ -1525,7 +1671,12 @@ def setup(ctx) -> None:
             return {"ok": False, "message": f"Не удалось посчитать: {e}"}
         if d.get("ok"):
             market = d["calc"]["settings"]["market"]
-            d["series"] = projects.price_series(market, p["type_id"]) if (qs.get("series") or ["1"])[0] == "1" else None
+            try:                                                 # план: график по выбранному продукту
+                tid = int((qs.get("tid") or [p["type_id"]])[0])
+            except ValueError:
+                tid = p["type_id"]
+            d["series_tid"] = tid
+            d["series"] = projects.price_series(market, tid) if (qs.get("series") or ["1"])[0] == "1" else None
             icons([p["type_id"]] + [m["type_id"] for m in d["materials"]] + [j["type_id"] for j in d["jobs"]])
         return d
 
@@ -1534,12 +1685,15 @@ def setup(ctx) -> None:
             return {"ok": False, "message": "Неверный запрос"}
         action = body.get("action")
         try:
-            if action == "create":
-                if not isinstance(body.get("product"), str):
+            if action in ("create", "draft"):
+                # настройки: по умолчанию (экран «Настройки по умолчанию») + то, что прислали (например, ME/TE из сканера)
+                st = dict(load_settings()["settings"], **(body.get("settings") if isinstance(body.get("settings"), dict) else {}))
+                items = clean_items(body.get("items")) if body.get("items") is not None else None
+                if items is None and not isinstance(body.get("product"), str):
                     return {"ok": False, "message": "Укажите, что строить."}
-                p = projects.create(body["product"], body.get("settings") if isinstance(body.get("settings"), dict) else None,
-                                    str(body.get("name") or ""))
-                return {"ok": True, "id": p["id"], "message": f"Закреплено: {p['name']}"}
+                p = projects.create(str(body.get("product") or ""), st, str(body.get("name") or ""), draft=action == "draft",
+                                    items=items, mode="buy" if body.get("mode") == "buy" else "full")
+                return {"ok": True, "id": p["id"], "message": ("Расчёт: " if p["draft"] else "Закреплено: ") + p["name"]}
             p = projects.get(str(body.get("id") or ""))
             if p is None:
                 return {"ok": False, "message": "Такого проекта нет — возможно, его удалили."}
@@ -1557,8 +1711,19 @@ def setup(ctx) -> None:
             elif action == "job":
                 projects.toggle_job(p, str(body.get("key") or ""), bool(body.get("done")))
             elif action == "settings":
-                projects.update_settings(p, body.get("settings") if isinstance(body.get("settings"), dict) else {},
-                                         str(body["name"]) if isinstance(body.get("name"), str) else None)
+                new = body.get("settings") if isinstance(body.get("settings"), dict) else {}
+                projects.update_settings(p, new, str(body["name"]) if isinstance(body.get("name"), str) else None)
+                if body.get("mode") in ("full", "buy") and p.get("kind") == "plan":
+                    p["mode"] = body["mode"]
+                    projects.save()
+                if body.get("as_default"):                       # где строим, навыки, рынок — и для новых расчётов
+                    cur = load_settings()
+                    keep = {k: v for k, v in p["settings"].items() if k not in ("runs", "me", "te", "build")}
+                    ctx.core.atomic_write_json(path, {"settings": clean_settings(dict(cur["settings"], **keep)), "product": cur["product"]})
+            elif action == "pin":
+                projects.pin(p)
+            elif action == "build":
+                projects.set_build(p, int(body.get("type_id") or 0), bool(body.get("on")))
             elif action == "delete":
                 projects.delete(p["id"])
             else:
@@ -1567,6 +1732,15 @@ def setup(ctx) -> None:
             return {"ok": False, "message": str(e)}
         return {"ok": True}
 
+    def fit(body, qs=None):
+        if not isinstance(body, dict):
+            return {"ok": False, "message": "Неверный запрос"}
+        try:
+            return {"ok": True, **fit_items(calc, str(body.get("text") or "")[:50_000], body.get("count") or 1)}
+        except (ValueError, TypeError) as e:
+            return {"ok": False, "message": str(e)}
+
+    ctx.post("/api/industry/fit", fit)
     ctx.get("/api/industry/projects", projects_list)
     ctx.get("/api/industry/project", project_get)
     ctx.post("/api/industry/projects", projects_post)
