@@ -440,6 +440,18 @@ class TestProjects(unittest.TestCase):
         with self.assertRaises(ValueError):
             ind.fit_items(self.calc, "   ")
 
+    def test_tree(self):
+        p = self.pr.create("Hobgoblin II", self.s, now=1000)
+        t = self.pr.tree(p, False)
+        self.assertEqual((t[0]["n"], t[0]["q"]), ("Hobgoblin II", 10))
+        self.assertEqual({c["n"]: c["built"] for c in t[0]["c"]}, {"Hobgoblin I": False, "Morphite": False, "Nocxium": False})
+        full = self.pr.tree(p, True)                                         # до минералов: Hobgoblin I раскрыт
+        hob = next(c for c in full[0]["c"] if c["n"] == "Hobgoblin I")
+        self.assertTrue(hob["built"])
+        self.assertEqual({c["n"] for c in hob["c"]}, {"Tritanium", "Pyerite"})
+        plan = self.pr.create("", self.s, "П", now=1000, items=[(2456, 2), (2454, 5)], mode="buy")
+        self.assertEqual([r["n"] for r in self.pr.tree(plan, False)], ["Hobgoblin II", "Hobgoblin I"])
+
     def test_price_series_cached(self):
         ser = self.pr.price_series("jita", 2456, now=100)
         self.assertEqual(len(ser), 20)

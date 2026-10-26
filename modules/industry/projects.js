@@ -318,6 +318,8 @@
               '<span class="in-sub" title="Для этого материала нет чертежа: его добывают, получают переработкой, на планетах или с NPC">не строится</span>') + '</td></tr>';
         }).join('') + '</tbody></table></div>');
     }
+    // дерево строительства: схема и список (tree.js)
+    if (ELW_INDUSTRY.tree) h += fold('treebox', 'Дерево строительства <span class="n">— что из чего строится и что уже собрано</span>', '<div id="pjTree"></div>');
     // материалы (что покупаем по плану) и сырьё (если строить всё самому)
     function matTable(list, fkey) {
       var f = Q[fkey] || 'all';
@@ -431,6 +433,7 @@
       return '<li><span class="muted">' + esc(L.fmtDateTime(x[0])) + '</span> ' + esc(x[1]) + '</li>'; }).join('') + '</ul>', false);
     box.innerHTML = h + '</section>';
     if ($('pjSetBox')) ELW_INDUSTRY.fillForm('pjS', s);
+    if (ELW_INDUSTRY.tree && $('pjTree')) ELW_INDUSTRY.tree.mount(d);
     Q.dirty = false;
     Object.keys(Q.charts).forEach(drawLines);
   }
@@ -583,6 +586,9 @@
   ELW_INDUSTRY.projects = {
     pin: pin,
     draft: draft,
+    build: function (tid, on) {                               // «строю сам / покупаю» из дерева
+      if (Q.d) act({ action: 'build', id: Q.d.project.id, type_id: tid, on: on }, on ? 'Строю сам — пересчитано.' : 'Покупаю — пересчитано.', true);
+    },
     defaults: function () {                                   // открыть «Настройки по умолчанию» (из сканера и плана)
       shell();
       if (Q.open) closeProject();

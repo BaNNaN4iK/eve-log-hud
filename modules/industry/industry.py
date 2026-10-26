@@ -1215,6 +1215,37 @@ class Projects:
             e = self._engine(p, now, settings=dict(p["settings"], build=sorted(build)))
         return e
 
+    def tree(self, p: dict, full: bool) -> list:
+        """Дерево строительства для схемы: продукт → материалы → (что строим) → их материалы.
+        full — строить самому все компоненты производства (до минералов), иначе — как в настройках проекта."""
+        bp = self.calc.data["bp"]
+        s = clean_settings(p["settings"])
+        if p.get("kind") == "plan":
+            tops = [(int(i["id"]), int(i["qty"])) for i in p.get("items") or []]
+            build = set() if not full and p.get("mode") == "buy" else None
+        else:
+            tops = [(int(p["type_id"]), s["runs"] * bp[str(p["type_id"])][3])]
+            build = set(s["build"])
+        if full or build is None:
+            build = (build or set()) | {int(k) for k, v in bp.items() if v[1] == "m"}
+            if p.get("kind") == "plan" and p.get("mode") != "buy" and not full:
+                build |= {int(k) for k in bp}                       # план «полный цикл» — и реакции
+
+        def mat(m):
+            node = {"t": m["type_id"], "n": m["name"], "q": m["qty"], "k": m.get("kind", ""), "b": m["buildable"], "built": "build" in m, "c": []}
+            if "build" in m:
+                node["runs"], node["out"] = m["build"]["runs"], m["build"]["out"]
+                node["c"] = [mat(x) for x in m["build"]["materials"]]
+            return node
+        out = []
+        for tid, units in tops[:20]:
+            if str(tid) not in bp:
+                continue
+            root = self.calc.plan(tid, units, s, build)
+            out.append({"t": tid, "n": root["name"], "q": units, "k": root["kind"], "b": True, "built": True, "top": True,
+                        "runs": root["runs"], "out": root["out"], "c": [mat(x) for x in root["materials"]]})
+        return out
+
     def _rows(self, shopping: list, have: dict) -> Tuple[list, dict]:
         rows, need_cost, have_cost, left_cost, left_vol, ready = [], 0.0, 0.0, 0.0, 0.0, 0
         for r in shopping:
@@ -1740,6 +1771,17 @@ def setup(ctx) -> None:
         except (ValueError, TypeError) as e:
             return {"ok": False, "message": str(e)}
 
+    def project_tree(qs):
+        p = projects.get((qs.get("id") or [""])[0])
+        if p is None:
+            return {"ok": False, "message": "Такого проекта нет."}
+        try:
+            return {"ok": True, "tree": projects.tree(p, (qs.get("full") or ["0"])[0] == "1")}
+        except Exception as e:
+            ctx.log.warning("Производство: дерево не построено: %s", e)
+            return {"ok": False, "message": f"Не удалось построить дерево: {e}"}
+
+    ctx.get("/api/industry/project/tree", project_tree)
     ctx.post("/api/industry/fit", fit)
     ctx.get("/api/industry/projects", projects_list)
     ctx.get("/api/industry/project", project_get)
