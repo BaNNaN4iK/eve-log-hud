@@ -219,7 +219,7 @@
     var shop = order.map(function (g) {
       var sum = groups[g].reduce(function (a, x) { return a + (x.total || 0); }, 0);
       return sec('buy_' + g, esc(g) + ' <span class="n">(' + groups[g].length + ' · ' + isk(sum) + ' ISK)</span>', table('plBuy' + order.indexOf(g), groups[g], [
-        { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + esc(x.name); } },
+        { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + ELW_INDUSTRY.cp(x.name); } },
         { k: 'qty', t: 'Количество', f: function (x) { return esc(L.fmtInt(x.qty)); } },
         { k: 'price', t: 'Цена', f: function (x) { return esc(isk(x.price)); } },
         { k: 'total', t: 'Сумма', f: function (x) { return esc(isk(x.total)); } },
@@ -232,7 +232,7 @@
     if (r.invention.length) {
       h += sec('inv', 'Изобретение <span class="n">— ' + r.invention.length + ' продукт. · ' + isk(t.invention) + ' ISK</span>' + ELW_INDUSTRY.help('pl_inv'),
         table('plInv', r.invention, [
-          { k: 'name', t: 'Для чего', l: 1, f: function (x) { return ico(x.type_id) + esc(x.name); } },
+          { k: 'name', t: 'Для чего', l: 1, f: function (x) { return ico(x.type_id) + ELW_INDUSTRY.cp(x.name); } },
           { k: 'runs', t: 'Нужно прогонов', f: function (x) { return esc(L.fmtInt(x.runs)); } },
           { k: 'chance', t: 'Шанс', f: function (x) { return esc(String(Math.round(x.chance * 1000) / 10).replace('.', ',')) + '%'; } },
           { k: 'per_copy', t: 'Прогонов в копии' },
@@ -245,7 +245,7 @@
     if (r.leftovers.length) {
       h += sec('left', 'Остатки <span class="n">— ' + r.leftovers.length + ' поз. · ' + isk(t.leftovers) + ' ISK</span>' + ELW_INDUSTRY.help('pl_left'),
         table('plLeft', r.leftovers, [
-          { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + esc(x.name) + (x.top ? ' <span class="sc-badge sure">продукт</span>' : ''); } },
+          { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + ELW_INDUSTRY.cp(x.name) + (x.top ? ' <span class="sc-badge sure">продукт</span>' : ''); } },
           { k: 'qty', t: 'Лишних', f: function (x) { return esc(L.fmtInt(Math.round(x.qty))); } },
           { k: 'total', t: 'Стоят', f: function (x) { return esc(isk(x.total)); } }
         ], { sort: { k: 'total', d: -1 } }), false);

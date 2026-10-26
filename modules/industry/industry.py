@@ -937,6 +937,7 @@ class History:
 # ---------------------------------------------------------------------------
 
 PROJECT_STATUSES = ("collect", "building", "done")
+MINERAL_GROUP = 18
 PROJECT_MAX = 50
 PROJECT_SNAP = 3600                    # снимок себестоимости и цены продукта для графика — не чаще раза в час
 PROJECT_SNAPS = 400
@@ -1036,34 +1037,81 @@ class Projects:
     def _log(self, p: dict, text: str, now: float) -> None:
         p["log"] = (p.get("log") or [])[-99:] + [[int(now), text[:200]]]
 
-    def detail(self, p: dict, now: Optional[float] = None, snap: bool = True) -> dict:
-        """Расчёт проекта: материалы (нужно / есть / осталось / докупить), работы, итоги, время."""
-        now = time.time() if now is None else now
+    def raw(self, p: dict, now: float) -> Optional[dict]:
+        """Сырьё: если строить самому все компоненты (производство; продукты реакций покупаются), — сколько каких материалов нужно.
+        None — строить нечего: закупка и так состоит из сырья."""
+        bp = self.calc.data["bp"]
         res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
-        if not res.get("ok"):
-            return res
-        have = p.get("have") or {}
-        mats, need_cost, have_cost, left_cost, left_vol, ready = [], 0.0, 0.0, 0.0, 0.0, 0
-        priced = res.get("prices")
-        for r in res["shopping"]:
+        if not res.get("ok") or not any(bp.get(str(r["type_id"]), [0, ""])[1] == "m" for r in res["shopping"]):
+            return None
+        build = set(p["settings"].get("build") or [])
+        for _ in range(8):                                       # раскрываем дерево слой за слоем
+            found = set()
+
+            def walk(node):
+                for m in node["materials"]:
+                    if "build" in m:
+                        walk(m["build"])
+                    elif m.get("buildable") and m.get("kind") == "m":   # реакции не раскрываем: их продукты покупают
+                        found.add(m["type_id"])
+            walk(res["tree"])
+            if not found - build:
+                break
+            build |= found
+            res = self.calc.calculate(str(p["type_id"]), dict(p["settings"], build=sorted(build)), now)
+        return res
+
+    def _rows(self, shopping: list, have: dict) -> Tuple[list, dict]:
+        rows, need_cost, have_cost, left_cost, left_vol, ready = [], 0.0, 0.0, 0.0, 0.0, 0
+        for r in shopping:
             h = int(have.get(str(r["type_id"]), 0))
             use = min(h, r["qty"])
             left = r["qty"] - use
             price = r["price"]
             vol1 = r["volume"] / r["qty"] if r["qty"] else 0
-            row = dict(r, have=h, left=left, extra=max(0, h - r["qty"]), pct=round(100 * use / r["qty"], 1) if r["qty"] else 100.0,
-                       have_cost=use * price if price is not None else None, left_cost=left * price if price is not None else None,
-                       left_volume=left * vol1)
-            mats.append(row)
+            rows.append(dict(r, have=h, left=left, extra=max(0, h - r["qty"]), pct=round(100 * use / r["qty"], 1) if r["qty"] else 100.0,
+                             have_cost=use * price if price is not None else None, left_cost=left * price if price is not None else None,
+                             left_volume=left * vol1))
             if price is not None:
                 need_cost += r["qty"] * price
                 have_cost += use * price
                 left_cost += left * price
             left_vol += left * vol1
             ready += 1 if left == 0 else 0
-        total_qty = sum(r["qty"] for r in mats) or 1
-        progress_value = round(100 * have_cost / need_cost, 1) if priced and need_cost else round(
-            100 * sum(min(r["have"], r["qty"]) for r in mats) / total_qty, 1)
+        qty = sum(r["qty"] for r in rows) or 1
+        progress = round(100 * have_cost / need_cost, 1) if need_cost else round(100 * sum(min(r["have"], r["qty"]) for r in rows) / qty, 1)
+        return rows, {"need_cost": need_cost, "have_cost": have_cost, "left_cost": left_cost, "left_volume": left_vol,
+                      "progress": progress, "ready": ready, "positions": len(rows),
+                      "progress_qty": round(100 * sum(min(r["have"], r["qty"]) for r in rows) / qty, 1)}
+
+    def detail(self, p: dict, now: Optional[float] = None, snap: bool = True, with_raw: bool = True) -> dict:
+        """Расчёт проекта: материалы (нужно / есть / осталось / докупить), работы, итоги, время."""
+        now = time.time() if now is None else now
+        res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
+        if not res.get("ok"):
+            return res
+        have = p.get("have") or {}
+        priced = res.get("prices")
+        mats, mt = self._rows(res["shopping"], have)
+        need_cost, have_cost, left_cost, left_vol, ready = mt["need_cost"], mt["have_cost"], mt["left_cost"], mt["left_volume"], mt["ready"]
+        progress_value = mt["progress"] if priced else mt["progress_qty"]
+        raw = None
+        if with_raw:
+            rr = self.raw(p, now)
+            if rr is not None:
+                rows, rt = self._rows(rr["shopping"], have)
+                types = self.calc.data["types"]
+                for r in rows:                                   # минералы (группа Mineral) — то, что дают руды
+                    r["mineral"] = (types.get(str(r["type_id"])) or [0, 0])[1] == MINERAL_GROUP
+                mins = [r for r in rows if r["mineral"]]
+                _, mt2 = self._rows([{k: r[k] for k in ("type_id", "name", "qty", "price", "total", "volume")} for r in mins], have)
+                raw = {"materials": rows, "totals": dict(rt, progress=rt["progress"] if priced else rt["progress_qty"],
+                                                         need_cost=rt["need_cost"] if priced else None,
+                                                         left_cost=rt["left_cost"] if priced else None,
+                                                         jobs=rr["totals"]["jobs"], cost=rr["totals"]["cost"],
+                                                         per_unit=rr["totals"]["per_unit"], time=rr["totals"]["time"],
+                                                         minerals=dict(mt2, progress=mt2["progress"] if priced else mt2["progress_qty"]) if mins else None),
+                       "jobs": len(rr["jobs"])}
         done = set(p.get("jobs_done") or [])
         jobs = []
         for i, j in enumerate(res["jobs"]):
@@ -1087,7 +1135,7 @@ class Projects:
                            # прибыль, если докупить недостающее; уже купленное — по рыночной цене (могли бы продать)
                            profit=cs.get("profit"), margin=cs.get("margin"), revenue=cs.get("revenue"), fees=cs.get("fees"),
                            isk_hour=cs.get("isk_hour")),
-            "eta": eta, "now": int(now), "snaps": p.get("snaps") or [],
+            "eta": eta, "now": int(now), "snaps": p.get("snaps") or [], "raw": raw,
         }
         if snap and priced and t.get("cost") is not None:
             snaps = p.get("snaps") or []
@@ -1101,7 +1149,7 @@ class Projects:
 
     def summary(self, p: dict, now: Optional[float] = None) -> dict:
         try:
-            d = self.detail(p, now)
+            d = self.detail(p, now, with_raw=False)
         except Exception as e:                                  # нет сети и т. п. — карточка без цифр
             d = {"ok": False, "message": str(e)}
         base = {"id": p["id"], "name": p["name"], "product": p["product"], "type_id": p["type_id"], "status": p["status"],
@@ -1153,7 +1201,11 @@ class Projects:
         res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
         if not res.get("ok"):
             raise ValueError(res.get("message") or "Расчёт не удался")
-        wanted = {r["name"].casefold(): r["type_id"] for r in res["shopping"]}
+        shop = list(res["shopping"])
+        rr = self.raw(p, now)
+        if rr is not None:
+            shop += rr["shopping"]
+        wanted = {r["name"].casefold(): r["type_id"] for r in shop}
         got: Dict[str, int] = {}
         unknown = []
         for name, q in rows:
@@ -1166,7 +1218,7 @@ class Projects:
             try:
                 ids, _ = self.calc.esi("/universe/ids/", "POST", [n for n, _ in unknown][:500], language="ru")
                 by = {e["name"].casefold(): e["id"] for e in (ids or {}).get("inventory_types") or []}
-                need = {r["type_id"] for r in res["shopping"]}
+                need = {r["type_id"] for r in shop}
                 rest = []
                 for name, q in unknown:
                     tid = by.get(name.casefold())
@@ -1193,7 +1245,7 @@ class Projects:
             p["started"], p["finished"] = int(now), None
             self._log(p, "Производство запущено", now)
         elif status == "done":
-            d = self.detail(p, now, snap=False)
+            d = self.detail(p, now, snap=False, with_raw=False)
             t = d.get("totals") or {}
             p["finished"] = int(now)
             p["batches"] = (p.get("batches") or [])[-199:] + [{

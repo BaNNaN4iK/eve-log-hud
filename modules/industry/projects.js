@@ -49,6 +49,15 @@
       return '<div style="width:' + (100 * p.v / total) + '%;background:' + p.c + '" title="' + esc(p.label + ': ' + isk(p.v) + ' ISK (' + pct(100 * p.v / total) + ')') + '"></div>';
     }).join('') + '</div>';
   }
+  function rawBars(list) {
+    var mins = list.filter(function (m) { return m.mineral; });
+    var top = (mins.length ? mins : list).slice().sort(function (a, b) { return (b.qty * (b.price || 0)) - (a.qty * (a.price || 0)); }).slice(0, 12);
+    if (!top.length) return '';
+    return (mins.length ? '<div class="small muted">Минералы: сколько есть из нужного</div>' : '') + '<div class="pj-hbars" role="img" aria-label="Сколько есть из нужного">' + top.map(function (m) {
+      return '<div class="pj-hb"><span class="nm">' + ico(m.type_id) + ELW_INDUSTRY.cp(m.name) + '</span><div class="tr"><div style="width:' + Math.min(100, m.pct) + '%;background:' + (m.left ? 'var(--accent)' : 'var(--good)') + '"></div></div>' +
+        '<span class="vl">' + esc(L.fmtCompact(Math.min(m.have, m.qty))) + ' / ' + esc(L.fmtCompact(m.qty)) + '</span></div>';
+    }).join('') + '</div>';
+  }
   function spark(vals, w, h) {
     vals = (vals || []).filter(function (v) { return v !== null && v !== undefined; });
     if (vals.length < 2) return '';
@@ -229,6 +238,8 @@
     h += '<div class="tiles">' +
       tile('Материалы собраны', pct(t.progress), t.ready + ' из ' + t.positions + ' позиций', t.progress >= 100 ? 'in-good' : '') +
       tile('Докупить', isk(t.left_cost), L.fmtInt(t.left_volume) + ' м³', t.left_cost > 0 ? '' : 'in-good') +
+      (d.raw && d.raw.totals.minerals ? tile('Минералы собраны', pct(d.raw.totals.minerals.progress), 'базовые руды · докупить ' + isk(d.raw.totals.minerals.left_cost), d.raw.totals.minerals.progress >= 100 ? 'in-good' : '') : '') +
+      (d.raw ? tile('Сырьё собрано', pct(d.raw.totals.progress), 'если строить всё · докупить ' + isk(d.raw.totals.left_cost), d.raw.totals.progress >= 100 ? 'in-good' : '') : '') +
       tile('Себестоимость', isk(t.cost), 'за штуку ' + isk(t.per_unit)) +
       tile('Прибыль', isk(t.profit), t.margin !== null && t.margin !== undefined ? 'маржа ' + pct(t.margin) : '', cls(t.profit)) +
       tile('Цена продукта', isk(prod.price), 'за штуку · ' + esc(c.market_name)) +
@@ -247,34 +258,56 @@
     if (d.prices) {
       h += fold('charts', 'Диаграммы', '<div class="pj-charts">' +
         '<div class="pj-box"><h3>Собрано материалов</h3><div class="pj-dn">' + donut(got, pct(t.progress), 'по стоимости') + legend(got, t.need_cost) + '</div></div>' +
+        (d.raw ? '<div class="pj-box"><h3>Сырьё собрано</h3><div class="pj-dn">' + donut([{ v: d.raw.totals.have_cost, c: 'var(--good)', label: 'есть на складе' }, { v: d.raw.totals.left_cost, c: 'var(--bad)', label: 'докупить' }],
+          pct(d.raw.totals.progress), 'сырьё') + legend([{ v: d.raw.totals.have_cost, c: 'var(--good)', label: 'есть на складе' }, { v: d.raw.totals.left_cost, c: 'var(--bad)', label: 'докупить' }], d.raw.totals.need_cost) + '</div></div>' : '') +
         '<div class="pj-box"><h3>Из чего себестоимость</h3><div class="pj-dn">' + donut(struct, isk(structTotal), 'ISK') + legend(struct, structTotal) + '</div></div>' +
         '<div class="pj-box"><h3>Куда уходит выручка</h3>' + (t.revenue ? '<div class="pj-rev">' + isk(t.revenue) + ' <span class="muted small">ISK выручка</span></div>' + stack(money) + legend(money, t.revenue) +
           (t.profit < 0 ? '<div class="small in-bad" style="margin-top:6px">Убыток ' + isk(-t.profit) + ' ISK: себестоимость выше выручки.</div>' : '') : '<p class="small muted">Нет цены продукта.</p>') + '</div>' +
         '</div>');
     }
 
-    // материалы
-    var shown = d.materials.filter(function (m) { return Q.filter === 'all' || (Q.filter === 'left' ? m.left > 0 : m.left === 0); });
-    shown.sort(function (a, b) { return (b.left > 0) - (a.left > 0) || (b.left_cost || 0) - (a.left_cost || 0) || a.name.localeCompare(b.name); });
-    var mt = '<div class="controls" style="margin:4px 0 8px">' +
-      ['all', 'left', 'ready'].map(function (f) { var n = f === 'all' ? d.materials.length : d.materials.filter(function (m) { return f === 'left' ? m.left > 0 : m.left === 0; }).length;
-        return '<button type="button" class="in-chip' + (Q.filter === f ? ' on' : '') + '" data-pj-filter="' + f + '">' + { all: 'Все', left: 'Не хватает', ready: 'Собрано' }[f] + '<span class="n">' + n + '</span></button>'; }).join('') +
-      '<span style="flex:1"></span><button type="button" class="btn" id="pjPasteBtn">Вставить склад из игры</button>' +
-      '<button type="button" class="btn" id="pjCopyLeft"' + (t.left_cost || d.materials.some(function (m) { return m.left; }) ? '' : ' disabled') + '>Скопировать, что докупить</button>' +
-      '<button type="button" class="btn" id="pjClear" title="Обнулить «Есть» у всех материалов">Обнулить склад</button></div>' +
+    // материалы (что покупаем по плану) и сырьё (если строить всё самому)
+    function matTable(list, fkey) {
+      var f = Q[fkey] || 'all';
+      var pass = function (m, x) { return x === 'all' || (x === 'min' ? m.mineral : x === 'left' ? m.left > 0 : m.left === 0); };
+      var shown = list.filter(function (m) { return pass(m, f); });
+      shown.sort(function (a, b) { return (b.left > 0) - (a.left > 0) || (b.left_cost || 0) - (a.left_cost || 0) || a.name.localeCompare(b.name); });
+      return '<div class="controls" style="margin:4px 0 8px">' +
+        ['all', 'min', 'left', 'ready'].filter(function (x) { return x !== 'min' || list.some(function (m) { return m.mineral; }); }).map(function (x) {
+          var n = list.filter(function (m) { return pass(m, x); }).length;
+          return '<button type="button" class="in-chip' + (f === x ? ' on' : '') + '" data-pj-filter="' + fkey + ':' + x + '">' + { all: 'Все', min: 'Минералы', left: 'Не хватает', ready: 'Собрано' }[x] + '<span class="n">' + n + '</span></button>'; }).join('') +
+        '<span style="flex:1"></span><button type="button" class="btn" data-pj-copyleft="' + fkey + '"' + (list.some(function (m) { return m.left; }) ? '' : ' disabled') + '>Скопировать, что докупить</button>' +
+        '<button type="button" class="btn" data-pj-copynames="' + fkey + '" title="Только названия, по одному в строке">Скопировать названия</button></div>' +
+        '<div class="tw"><table class="pj-mats"><thead><tr><th class="l">Материал <span class="in-sub">(нажмите — скопировать)</span></th><th>Нужно</th><th>Есть</th><th>Осталось</th><th class="l" style="min-width:120px">Собрано</th><th>Цена</th><th>Докупить за</th></tr></thead><tbody>' +
+        shown.map(function (m) {
+          return '<tr class="' + (m.left ? '' : 'in-rgood') + '"><td class="l">' + ico(m.type_id) + ELW_INDUSTRY.cp(m.name) + '</td><td>' + esc(L.fmtInt(m.qty)) + '</td>' +
+            '<td><input class="pj-have" data-pj-have="' + m.type_id + '" value="' + (m.have ? esc(L.fmtInt(m.have)) : '') + '" placeholder="0" inputmode="numeric" aria-label="Есть: ' + esc(m.name) + '"></td>' +
+            '<td>' + (m.left ? '<b class="in-bad">' + esc(L.fmtInt(m.left)) + '</b>' : '<span class="in-good">✓</span>') + (m.extra ? '<div class="in-sub">лишних ' + esc(L.fmtInt(m.extra)) + '</div>' : '') + '</td>' +
+            '<td class="l"><div class="pj-prog sm"><div style="width:' + Math.min(100, m.pct) + '%"></div></div><span class="in-sub">' + pct(m.pct) + '</span></td>' +
+            '<td>' + esc(isk(m.price)) + '</td><td>' + (m.left ? esc(isk(m.left_cost)) : '—') + '</td></tr>';
+        }).join('') + (shown.length ? '' : '<tr><td colspan="7" class="muted l">Ничего.</td></tr>') + '</tbody></table></div>';
+    }
+    var tools = '<div class="controls" style="margin:4px 0 8px"><button type="button" class="btn" id="pjPasteBtn">Вставить склад из игры</button>' +
+      '<button type="button" class="btn" id="pjClear" title="Обнулить «Есть» у всех материалов и сырья">Обнулить склад</button>' +
+      '<span class="small muted">Склад общий для материалов и сырья: вставка из игры узнаёт и то и другое.</span></div>' +
       '<div id="pjPaste"' + (Q.paste ? '' : ' hidden') + ' class="pj-paste"><div class="small muted">В игре откройте ангар или контейнер, выделите предметы (Ctrl+A), скопируйте (Ctrl+C) и вставьте сюда. Подойдёт и список «Название количество» построчно; названия — на английском или русском.</div>' +
       '<textarea id="pjPasteText" rows="6" placeholder="Tritanium&#9;1 200 000&#10;Pyerite&#9;300 000" aria-label="Склад из игры"></textarea>' +
       '<div class="controls"><label class="small"><input type="radio" name="pjPm" value="set" checked> заменить «Есть»</label><label class="small"><input type="radio" name="pjPm" value="add"> прибавить к «Есть»</label>' +
-      '<button type="button" class="btn primary" id="pjPasteGo">Применить</button></div></div>' +
-      '<div class="tw"><table class="pj-mats"><thead><tr><th class="l">Материал</th><th>Нужно</th><th>Есть</th><th>Осталось</th><th class="l" style="min-width:120px">Собрано</th><th>Цена</th><th>Докупить за</th></tr></thead><tbody>' +
-      shown.map(function (m) {
-        return '<tr class="' + (m.left ? '' : 'in-rgood') + '"><td class="l">' + ico(m.type_id) + esc(m.name) + '</td><td>' + esc(L.fmtInt(m.qty)) + '</td>' +
-          '<td><input class="pj-have" data-pj-have="' + m.type_id + '" value="' + (m.have ? esc(L.fmtInt(m.have)) : '') + '" placeholder="0" inputmode="numeric" aria-label="Есть: ' + esc(m.name) + '"></td>' +
-          '<td>' + (m.left ? '<b class="in-bad">' + esc(L.fmtInt(m.left)) + '</b>' : '<span class="in-good">✓</span>') + (m.extra ? '<div class="in-sub">лишних ' + esc(L.fmtInt(m.extra)) + '</div>' : '') + '</td>' +
-          '<td class="l"><div class="pj-prog sm"><div style="width:' + Math.min(100, m.pct) + '%"></div></div><span class="in-sub">' + pct(m.pct) + '</span></td>' +
-          '<td>' + esc(isk(m.price)) + '</td><td>' + (m.left ? esc(isk(m.left_cost)) : '—') + '</td></tr>';
-      }).join('') + (shown.length ? '' : '<tr><td colspan="7" class="muted l">Ничего.</td></tr>') + '</tbody></table></div>';
-    h += fold('mats', 'Материалы <span class="n">— собрано ' + pct(t.progress) + ', докупить ' + isk(t.left_cost) + ' ISK</span>', mt);
+      '<button type="button" class="btn primary" id="pjPasteGo">Применить</button></div></div>';
+    h += tools;
+    h += fold('mats', 'Материалы <span class="n">— что покупаете по плану: собрано ' + pct(t.progress) + ', докупить ' + isk(t.left_cost) + ' ISK</span>', matTable(d.materials, 'filter'));
+    if (d.raw) {
+      var rt = d.raw.totals;
+      h += fold('raw', 'Сырьё <span class="n">— если строить все компоненты самому: собрано ' + pct(rt.progress) + ', докупить ' + isk(rt.left_cost) + ' ISK</span>',
+        '<div class="pj-rawbar">' + (rt.minerals ? '<div class="small muted">Минералы — базовые руды</div><div class="pj-prog big min"><div style="width:' + Math.min(100, rt.minerals.progress) + '%"></div><span>' + pct(rt.minerals.progress) + ' · ' +
+          rt.minerals.ready + ' из ' + rt.minerals.positions + ' · докупить ' + isk(rt.minerals.left_cost) + ' ISK</span></div>' : '') +
+        '<div class="small muted">Всё сырьё</div><div class="pj-prog big"><div style="width:' + Math.min(100, rt.progress) + '%"></div><span>' + pct(rt.progress) + '</span></div>' +
+        '<div class="pj-row"><span>собрано позиций <b>' + rt.ready + ' из ' + rt.positions + '</b> · по количеству <b>' + pct(rt.progress_qty) + '</b></span>' +
+        '<span>докупить <b>' + isk(rt.left_cost) + '</b> ISK · ' + L.fmtInt(rt.left_volume) + ' м³</span></div>' +
+        '<div class="pj-row"><span>себестоимость при постройке всего <b>' + isk(rt.cost) + '</b> (работы ' + isk(rt.jobs) + ', ' + d.raw.jobs + ' работ)</span>' +
+        '<span>против покупки компонентов <b class="' + cls((t.cost || 0) - (rt.cost || 0)) + '">' + (rt.cost !== null && t.cost !== null ? ((t.cost - rt.cost) >= 0 ? 'дешевле на ' : 'дороже на ') + isk(Math.abs(t.cost - rt.cost)) : '—') + '</b></span></div></div>' +
+        rawBars(d.raw.materials) + matTable(d.raw.materials, 'rfilter'));
+    }
 
     // работы
     if (d.jobs.length) {
@@ -282,7 +315,7 @@
         '<div class="tw"><table><thead><tr><th>Готово</th><th class="l">Что</th><th>Прогонов</th><th>Выйдет</th><th>Время</th><th>Стоимость работы</th></tr></thead><tbody>' +
         d.jobs.map(function (j) {
           return '<tr class="' + (j.done ? 'in-rgood' : '') + '"><td><input type="checkbox" data-pj-job="' + esc(j.key) + '"' + (j.done ? ' checked' : '') + ' aria-label="Готово: ' + esc(j.name) + '"></td>' +
-            '<td class="l"><span style="padding-left:' + (j.depth * 22) + 'px">' + ico(j.type_id) + esc(j.name) + '</span>' + (j.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') + '</td>' +
+            '<td class="l"><span style="padding-left:' + (j.depth * 22) + 'px">' + ico(j.type_id) + ELW_INDUSTRY.cp(j.name) + '</span>' + (j.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') + '</td>' +
             '<td>' + esc(L.fmtInt(j.runs)) + '</td><td>' + esc(L.fmtInt(j.out)) + '</td><td>' + esc(L.fmtDur(Math.round(j.time))) + '</td><td>' + esc(isk(j.cost)) + '</td></tr>';
         }).join('') + '</tbody></table></div>');
     }
@@ -385,7 +418,7 @@
       return;
     }
     var f = e.target.closest('[data-pj-filter]');
-    if (f) { Q.filter = f.getAttribute('data-pj-filter'); drawDetail(); return; }
+    if (f) { var fv = f.getAttribute('data-pj-filter').split(':'); Q[fv[0]] = fv[1]; drawDetail(); return; }
     var st = e.target.closest('[data-pj-status]');
     if (st && Q.d) {
       var to = st.getAttribute('data-pj-status');
@@ -411,9 +444,13 @@
       return;
     }
     if (e.target.id === 'pjClear') { if (confirm('Обнулить «Есть» у всех материалов?')) act({ action: 'clear', id: id }, 'Склад обнулён.'); return; }
-    if (e.target.id === 'pjCopyLeft') {
-      var text = Q.d.materials.filter(function (m) { return m.left > 0; }).map(function (m) { return m.name + ' ' + m.left; }).join('\n');
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { flash('Скопировано — вставляется в «Купить несколько» на рынке игры.'); }, function () { flash('Не удалось скопировать.'); });
+    var cl = e.target.closest('[data-pj-copyleft],[data-pj-copynames]');
+    if (cl) {
+      var raw = (cl.getAttribute('data-pj-copyleft') || cl.getAttribute('data-pj-copynames')) === 'rfilter', list = raw && Q.d.raw ? Q.d.raw.materials : Q.d.materials;
+      var text = cl.hasAttribute('data-pj-copyleft') ? list.filter(function (m) { return m.left > 0; }).map(function (m) { return m.name + ' ' + m.left; }).join('\n') :
+        list.map(function (m) { return m.name; }).join('\n');
+      ELW_INDUSTRY.copyText(text).then(function () {
+        flash(cl.hasAttribute('data-pj-copyleft') ? 'Скопировано — вставляется в «Купить несколько» на рынке игры.' : 'Названия скопированы.'); }, function () { flash('Не удалось скопировать.'); });
       return;
     }
     if (e.target.id === 'pjSaveSet') {

@@ -383,6 +383,21 @@ class TestProjects(unittest.TestCase):
         self.assertTrue(self.pr.delete(p["id"]))
         self.assertIsNone(self.pr.get(p["id"]))
 
+    def test_raw_materials(self):
+        p = self.pr.create("Hobgoblin II", self.s, now=1000)
+        d = self.pr.detail(p, now=1000)
+        raw = {m["name"]: m["qty"] for m in d["raw"]["materials"]}
+        self.assertEqual(raw, {"Morphite": 20, "Nocxium": 100, "Tritanium": 4581, "Pyerite": 63})    # Hobgoblin I раскрыт до минералов (ME компонентов 10)
+        r = self.pr.paste(p, "Tritanium 4581" + chr(10) + "Pyerite 35", now=1000)                               # склад узнаёт и сырьё
+        self.assertEqual(r["matched"], 2)
+        d = self.pr.detail(p, now=1000)
+        rt = d["raw"]["totals"]
+        self.assertEqual((rt["ready"], rt["positions"]), (1, 4))
+        self.assertGreater(rt["progress"], 0)
+        self.assertEqual(d["totals"]["progress"], 0)                         # закупка по плану (Hobgoblin I) не тронута
+        p2 = self.pr.create("Crystalline Carbonide", {"runs": 1, "structure": "tatara", "security": "null"}, now=1000)
+        self.assertIsNone(self.pr.detail(p2, now=1000)["raw"])               # строить нечего — сырьё и есть закупка
+
     def test_price_series_cached(self):
         ser = self.pr.price_series("jita", 2456, now=100)
         self.assertEqual(len(ser), 20)

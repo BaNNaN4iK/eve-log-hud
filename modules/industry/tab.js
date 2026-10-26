@@ -109,7 +109,13 @@
       '.pj-mats td,.pj-mats th{vertical-align:middle}.pj-have{width:110px;box-sizing:border-box;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;text-align:right;font:inherit;font-variant-numeric:tabular-nums}' +
       '.pj-have:focus{border-color:var(--accent);outline:none}.pj-paste{background:var(--panel2);border-radius:8px;padding:10px;margin-bottom:10px}.pj-paste textarea{width:100%;box-sizing:border-box;margin:6px 0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:12.5px ui-monospace,Consolas,monospace}' +
       '.pj-bars{display:flex;align-items:flex-end;gap:3px;height:70px;margin:4px 0 10px}.pj-bars>div{flex:1;height:100%;display:flex;align-items:flex-end}.pj-bars span{display:block;width:100%;border-radius:3px 3px 0 0}' +
-      '.pj-log{list-style:none;padding:0;margin:0;font-size:12.5px;max-height:240px;overflow:auto}.pj-log li{padding:2px 0}',
+      '.pj-log{list-style:none;padding:0;margin:0;font-size:12.5px;max-height:240px;overflow:auto}.pj-log li{padding:2px 0}' +
+      '.in-cp{cursor:copy;border-bottom:1px dashed transparent;transition:color .15s}.in-cp:hover,.in-cp:focus{border-bottom-color:var(--muted);outline:none}.in-cp.in-copied{color:var(--good);border-bottom-color:var(--good)}' +
+      '.in-cp.in-copied::after{content:" \\2713  скопировано";font-size:11px}' +
+      '.pj-rawbar{background:var(--panel2);border-radius:10px;padding:10px 12px;margin:4px 0 10px;display:flex;flex-direction:column;gap:6px}' +
+      '.pj-prog.big.min>div{background:linear-gradient(90deg,#6c7a89,#aab7c4)}.pj-prog.big{height:22px;border-radius:7px;position:relative}.pj-prog.big>span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:var(--text);text-shadow:0 1px 2px rgba(0,0,0,.6)}' +
+      '.pj-hbars{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:6px 18px;margin:4px 0 10px}.pj-hb{display:grid;grid-template-columns:minmax(120px,1.2fr) 2fr auto;gap:8px;align-items:center;font-size:12.5px}' +
+      '.pj-hb .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pj-hb .tr{height:10px;background:var(--panel);border-radius:5px;overflow:hidden}.pj-hb .tr>div{height:100%;border-radius:5px}.pj-hb .vl{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}',
     html: '<div class="in-views" role="tablist" aria-label="Экран производства"><button type="button" class="in-chip" id="inViewScan" role="tab">Сканер прибыльности</button>' +
       '<button type="button" class="in-chip" id="inViewCalc" role="tab">Калькулятор</button><button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button>' +
       '<button type="button" class="in-chip" id="inViewProj" role="tab">📌 Ведение производства</button></div>' +
@@ -200,6 +206,35 @@
   ELW_INDUSTRY.ico = function (t) { return ico(t); };
   ELW_INDUSTRY.fold = fold;
   ELW_INDUSTRY.show = setView;
+  // название предмета: нажатие копирует его (для поиска в игре)
+  ELW_INDUSTRY.cp = function (name) {
+    return '<span class="in-cp" data-copy-name="' + esc(name) + '" tabindex="0" role="button" title="Нажмите — скопировать название">' + esc(name) + '</span>';
+  };
+  // копирование: через скрытое поле, а если не вышло — буфер обмена браузера (он может ждать разрешения)
+  function copyText(text) {
+    function legacy() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok ? Promise.resolve() : Promise.reject(new Error('copy'));
+    }
+    // сначала — сразу в момент нажатия (работает везде, где есть нажатие); не вышло — буфер обмена браузера
+    return legacy().then(null, function () {
+      return navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : Promise.reject(new Error('copy'));
+    });
+  }
+  ELW_INDUSTRY.copyText = copyText;
+  function copyName(el) {
+    var name = el.getAttribute('data-copy-name');
+    var done = function (ok) { el.classList.add(ok ? 'in-copied' : 'in-bad'); el.setAttribute('title', ok ? 'Скопировано: ' + name : 'Не удалось скопировать');
+      setTimeout(function () { el.classList.remove('in-copied', 'in-bad'); el.setAttribute('title', 'Нажмите — скопировать название'); }, 1200); };
+    copyText(name).then(function () { done(true); }, function () { done(false); });
+  }
+  document.addEventListener('click', function (e) { var el = e.target.closest && e.target.closest('[data-copy-name]'); if (el) { e.stopPropagation(); copyName(el); } }, true);
+  document.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-copy-name]')) { e.preventDefault(); copyName(e.target); } });
 
   function settings() {
     var s = { build: I.build };
@@ -328,7 +363,7 @@
       }), [
         { k: '', t: 'Материал', l: 1, f: function (x) {
           var m = x.m;
-          return '<span class="in-ind" style="padding-left:' + (x.depth * 22) + 'px">' + ico(m.type_id) + esc(m.name) + '</span>' +
+          return '<span class="in-ind" style="padding-left:' + (x.depth * 22) + 'px">' + ico(m.type_id) + ELW_INDUSTRY.cp(m.name) + '</span>' +
             (m.build ? '<div class="in-sub" style="padding-left:' + (x.depth * 22 + 25) + 'px">строю: ' + L.fmtInt(m.build.runs) + ' прог. → ' + L.fmtInt(m.build.out) + ' шт.' + (m.build.out > m.qty ? ', останется ' + L.fmtInt(m.build.out - m.qty) : '') + '</div>' : '');
         } },
         { k: '', t: 'По чертежу', title: 'Сколько нужно без ME и бонусов: количество в чертеже × прогоны', f: function (x) { return '<span class="muted">' + esc(L.fmtInt(x.m.base * x.runs)) + '</span>'; } },
@@ -344,7 +379,7 @@
 
     // работы
     h += fold('c_jobs', 'Работы <span class="n">(' + r.jobs.length + ')</span>', table('inJobs', r.jobs, [
-      { k: 'name', t: 'Что', l: 1, f: function (j) { return '<span style="padding-left:' + (j.depth * 22) + 'px">' + ico(j.type_id) + esc(j.name) + '</span>' + (j.kind === 'r' ? ' <span class="in-sub">реакция</span>' : ''); } },
+      { k: 'name', t: 'Что', l: 1, f: function (j) { return '<span style="padding-left:' + (j.depth * 22) + 'px">' + ico(j.type_id) + ELW_INDUSTRY.cp(j.name) + '</span>' + (j.kind === 'r' ? ' <span class="in-sub">реакция</span>' : ''); } },
       { k: 'runs', t: 'Прогонов', f: function (j) { return esc(L.fmtInt(j.runs)); } },
       { k: 'out', t: 'Выйдет', f: function (j) { return esc(L.fmtInt(j.out)); } },
       { k: 'time', t: 'Время', f: function (j) { return esc(dur(j.time)); } },
@@ -354,7 +389,7 @@
 
     // закупка
     h += fold('c_buy', 'Что купить <span class="n">(' + r.shopping.length + ' поз. · ' + isk(t.materials) + ' ISK)</span>', table('inBuyList', r.shopping, [
-      { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + esc(x.name); } },
+      { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + ELW_INDUSTRY.cp(x.name); } },
       { k: 'qty', t: 'Количество', f: function (x) { return esc(L.fmtInt(x.qty)); } },
       { k: 'price', t: 'Цена', f: function (x) { return esc(isk(x.price)); } },
       { k: 'total', t: 'Сумма', f: function (x) { return esc(isk(x.total)); } },
