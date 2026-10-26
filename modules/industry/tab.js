@@ -90,10 +90,30 @@
       'details.in-sec>summary::-webkit-details-marker{display:none}details.in-sec>summary::before{content:"\\25B8";display:inline-block;width:1.1em;transition:transform .15s}\n' +
       'details.in-sec[open]>summary::before{transform:rotate(90deg)}details.in-sec>summary:hover{color:var(--text)}details.in-sec>summary .n{font-weight:400}\n' +
       'tr.in-rgood>td:first-child{box-shadow:inset 4px 0 0 var(--good)}tr.in-rbad>td:first-child{box-shadow:inset 4px 0 0 var(--bad)}\n' +
-      '.tile.in-t{position:relative;cursor:help}.tile.in-t .k{text-decoration:underline dotted;text-underline-offset:3px}.tile.in-t:hover .in-tip,.tile.in-t:focus .in-tip{display:block}',
+      '.tile.in-t{position:relative;cursor:help}.tile.in-t .k{text-decoration:underline dotted;text-underline-offset:3px}.tile.in-t:hover .in-tip,.tile.in-t:focus .in-tip{display:block}' +
+      '\n.pj-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-top:10px}' +
+      '.pj-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px}.pj-card:hover,.pj-card:focus{border-color:var(--accent);outline:none}' +
+      '.pj-hd{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center}.pj-row{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--muted);align-items:center}.pj-row b{color:var(--text)}' +
+      '.pj-st{font-size:11px;border-radius:6px;padding:2px 8px;border:1px solid var(--line);white-space:nowrap}.pj-collect{color:var(--warn);border-color:var(--warn)}.pj-building{color:var(--accent);border-color:var(--accent)}.pj-done{color:var(--good);border-color:var(--good)}' +
+      '.pj-prog{height:8px;background:var(--panel);border-radius:4px;overflow:hidden}.pj-prog>div{height:100%;background:linear-gradient(90deg,var(--accent),var(--good));transition:width .4s}.pj-prog.sm{height:6px;margin-bottom:2px}' +
+      '.pj-steps{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:8px 0;counter-reset:st}.pj-steps li{flex:1 1 140px;padding:7px 10px;border-radius:8px;background:var(--panel2);font-size:13px;color:var(--muted)}' +
+      '.pj-steps li::before{counter-increment:st;content:counter(st) ". ";font-weight:700}.pj-steps li.done{color:var(--text);background:color-mix(in srgb,var(--good) 20%,var(--panel2))}.pj-steps li.done::before{content:"\\2713  "}' +
+      '.pj-steps li.now{color:var(--text);font-weight:650;background:color-mix(in srgb,var(--accent) 22%,var(--panel2));box-shadow:inset 0 0 0 1px var(--accent)}.pj-actions{margin:6px 0 12px}' +
+      '.pj-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:4px}.pj-box{background:var(--panel2);border-radius:10px;padding:10px 12px}.pj-box h3{margin:0 0 8px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}' +
+      '.pj-dn{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.pj-dn svg{flex:none}.pj-leg{display:flex;flex-direction:column;gap:3px;font-size:12px;min-width:0;flex:1}.pj-leg>div{display:flex;gap:6px;align-items:center;min-width:0}' +
+      '.pj-leg i{width:10px;height:10px;border-radius:3px;flex:none}.pj-leg span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}.pj-leg b{font-variant-numeric:tabular-nums;font-weight:600}.pj-leg em{font-style:normal;color:var(--muted);width:46px;text-align:right}' +
+      '.pj-leg-row{flex-direction:row;flex-wrap:wrap;gap:4px 14px;margin-top:4px}.pj-leg-row>div{flex:none}.pj-rev{font-size:20px;font-weight:700;margin-bottom:6px}' +
+      '.pj-stack{display:flex;height:22px;border-radius:6px;overflow:hidden;margin-bottom:8px;background:var(--panel)}.pj-stack>div{height:100%}' +
+      '.pj-chart{position:relative}.pj-tip{position:absolute;z-index:5;pointer-events:none;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 9px;box-shadow:0 6px 20px rgba(0,0,0,.35);white-space:nowrap}' +
+      '.pj-tip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}.pj-stats{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5px;color:var(--muted);margin:2px 0 6px}.pj-stats b{color:var(--text)}' +
+      '.pj-mats td,.pj-mats th{vertical-align:middle}.pj-have{width:110px;box-sizing:border-box;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;text-align:right;font:inherit;font-variant-numeric:tabular-nums}' +
+      '.pj-have:focus{border-color:var(--accent);outline:none}.pj-paste{background:var(--panel2);border-radius:8px;padding:10px;margin-bottom:10px}.pj-paste textarea{width:100%;box-sizing:border-box;margin:6px 0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:12.5px ui-monospace,Consolas,monospace}' +
+      '.pj-bars{display:flex;align-items:flex-end;gap:3px;height:70px;margin:4px 0 10px}.pj-bars>div{flex:1;height:100%;display:flex;align-items:flex-end}.pj-bars span{display:block;width:100%;border-radius:3px 3px 0 0}' +
+      '.pj-log{list-style:none;padding:0;margin:0;font-size:12.5px;max-height:240px;overflow:auto}.pj-log li{padding:2px 0}',
     html: '<div class="in-views" role="tablist" aria-label="Экран производства"><button type="button" class="in-chip" id="inViewScan" role="tab">Сканер прибыльности</button>' +
-      '<button type="button" class="in-chip" id="inViewCalc" role="tab">Калькулятор</button><button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button></div>' +
-      '<div id="inScanView"></div><div id="inPlanView"></div><div id="inCalcView">' +
+      '<button type="button" class="in-chip" id="inViewCalc" role="tab">Калькулятор</button><button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button>' +
+      '<button type="button" class="in-chip" id="inViewProj" role="tab">📌 Ведение производства</button></div>' +
+      '<div id="inScanView"></div><div id="inPlanView"></div><div id="inProjView"></div><div id="inCalcView">' +
       '<section class="panel"><h2>Калькулятор производства <span class="muted small">материалы, стоимость работы, время и прибыль</span></h2>' +
       '<div class="in-grid" style="grid-template-columns:minmax(260px,2fr) repeat(3,minmax(110px,1fr))">' +
       '<label class="small muted">' + lab('Что строим', 'product') + '<input id="inProduct" list="inList" autocomplete="off" spellcheck="false" placeholder="например: Vexor, Hobgoblin II, Ishtar"><datalist id="inList"></datalist></label>' +
@@ -126,6 +146,7 @@
       showView();
       if (I.view === 'scan') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(); return; }
       if (I.view === 'plan') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.plan) ELW_INDUSTRY.plan.render(); return; }
+      if (I.view === 'proj') { if (window.ELW_INDUSTRY && ELW_INDUSTRY.projects) ELW_INDUSTRY.projects.render(); return; }
       var key = JSON.stringify((ELW.S && ELW.S.sort) || {});             // ядро зовёт render() каждые 4 с и при сортировке
       if (I.sortKey !== key) { I.sortKey = key; draw(); }
     } });
@@ -134,9 +155,9 @@
     ['inIndex', 'cost_index'], ['inTax', 'facility_tax'], ['inScc', 'scc'], ['inInd', 'industry'], ['inAdv', 'adv_industry'], ['inReact', 'reactions'],
     ['inCme', 'comp_me'], ['inCte', 'comp_te'], ['inMarket', 'market'], ['inBuy', 'buy_mode'], ['inSell', 'sell_mode'], ['inSalesTax', 'sales_tax'], ['inBroker', 'broker'], ['inSci', 'inv_sci'], ['inEnc', 'inv_enc']];
   var I = { inited: false, res: null, build: [], t: null, view: 'scan', week: null };
-  try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'calc' || v0 === 'plan' ? v0 : 'scan'; } catch (e) { }
+  try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'calc' || v0 === 'plan' || v0 === 'proj' ? v0 : 'scan'; } catch (e) { }
   function showView() {
-    [['scan', 'inScanView', 'inViewScan'], ['calc', 'inCalcView', 'inViewCalc'], ['plan', 'inPlanView', 'inViewPlan']].forEach(function (v) {
+    [['scan', 'inScanView', 'inViewScan'], ['calc', 'inCalcView', 'inViewCalc'], ['plan', 'inPlanView', 'inViewPlan'], ['proj', 'inProjView', 'inViewProj']].forEach(function (v) {
       $(v[1]).hidden = I.view !== v[0];
       $(v[2]).classList.toggle('on', I.view === v[0]);
       $(v[2]).setAttribute('aria-selected', I.view === v[0]);
@@ -148,6 +169,7 @@
     showView();
     if (v === 'scan' && window.ELW_INDUSTRY && ELW_INDUSTRY.scanner) ELW_INDUSTRY.scanner.render(true);
     if (v === 'plan' && window.ELW_INDUSTRY && ELW_INDUSTRY.plan) ELW_INDUSTRY.plan.render();
+    if (v === 'proj' && window.ELW_INDUSTRY && ELW_INDUSTRY.projects) ELW_INDUSTRY.projects.render(true);
     window.scrollTo(0, 0);
   }
   // сворачиваемые разделы: что свёрнуто — запоминается (общий помощник для калькулятора, сканера и плана)
@@ -177,6 +199,7 @@
   ELW_INDUSTRY.help = function (key) { return help(key); };
   ELW_INDUSTRY.ico = function (t) { return ico(t); };
   ELW_INDUSTRY.fold = fold;
+  ELW_INDUSTRY.show = setView;
 
   function settings() {
     var s = { build: I.build };
@@ -226,6 +249,7 @@
   $('inViewScan').addEventListener('click', function () { setView('scan'); });
   $('inViewCalc').addEventListener('click', function () { setView('calc'); });
   $('inViewPlan').addEventListener('click', function () { setView('plan'); });
+  $('inViewProj').addEventListener('click', function () { setView('proj'); });
 
   function calc() {
     var msg = $('inMsg'), btn = $('inGo');
@@ -264,7 +288,8 @@
     };
     var cmp = r.compare || {}, cs = cmp.sell || {}, cb = cmp.buy || {}, best = cs.isk_hour !== null && cs.isk_hour !== undefined ? cs : cb;
     var week = I.week;
-    var h = '<section class="panel"><button type="button" class="in-back" id="inBack">← к сканеру</button><h2>' + ico(p.type_id) + esc(p.name) + ' <span class="muted small">' + (p.kind === 'r' ? 'реакция' : 'производство') + ' · ' + L.fmtInt(p.units) + ' шт. · ' +
+    var h = '<section class="panel"><div class="controls" style="justify-content:space-between;margin-bottom:0"><button type="button" class="in-back" id="inBack">← к сканеру</button>' +
+      '<span><button type="button" class="btn" id="inPin" title="Закрепить чертёж с этими настройками: склад, что докупить, этапы, графики цен">📌 Закрепить</button> <span class="small muted" id="inPinMsg" role="status"></span></span></div><h2>' + ico(p.type_id) + esc(p.name) + ' <span class="muted small">' + (p.kind === 'r' ? 'реакция' : 'производство') + ' · ' + L.fmtInt(p.units) + ' шт. · ' +
       esc(r.market_name) + (r.cost_index !== null && r.cost_index !== undefined ? ' · индекс ' + String(Math.round(r.cost_index * 100) / 100).replace('.', ',') + '%' + (r.system ? ' (' + esc(r.system) + ')' : '') : '') + '</span></h2>';
     if (r.warning) h += '<p class="small in-bad">' + esc(r.warning) + '</p>';
     if (r.cost_index === null || r.cost_index === undefined) h += '<p class="small muted">Стоимость работы не посчитана: укажите систему (индекс возьмётся из игры) или впишите свой индекс.</p>';
@@ -350,6 +375,12 @@
   });
   $('inResult').addEventListener('click', function (e) {
     if (e.target.id === 'inBack') { setView('scan'); return; }
+    if (e.target.id === 'inPin' && I.res && ELW_INDUSTRY.projects) {
+      $('inPinMsg').textContent = 'Закрепляю…';
+      ELW_INDUSTRY.projects.pin(I.res.product.name, settings()).then(function (j) { if (!j.ok && $('inPinMsg')) $('inPinMsg').textContent = j.message; },
+        function () { $('inPinMsg').textContent = 'Нет связи с трекером.'; });
+      return;
+    }
     if (e.target.id !== 'inCopy' || !I.res) return;
     var text = I.res.shopping.map(function (x) { return x.name + ' ' + x.qty; }).join('\n'), msg = $('inCopyMsg');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = 'Скопировано — вставляется в «Купить несколько» на рынке игры.'; }, function () { msg.textContent = 'Не удалось.'; });

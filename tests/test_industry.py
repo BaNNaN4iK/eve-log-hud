@@ -308,3 +308,133 @@ class TestPlan(unittest.TestCase):
         p = r["products"][0]
         self.assertAlmostEqual(p["cost"], t["cost"])                                # один продукт — тот же итог
         self.assertAlmostEqual(p["unit_cost"], t["cost"] / 10)
+
+
+class HistEsi(FakeEsi):
+    def __call__(self, path, method="GET", body=None, **params):
+        if path == "/markets/10000002/history/":
+            return [{"date": f"2026-10-{d:02d}", "average": 300000 + d, "lowest": 290000, "highest": 340000, "volume": 100 + d}
+                    for d in range(1, 21)], {}
+        if path == "/universe/ids/" and body and "Морфит" in body:
+            return {"inventory_types": [{"id": 11399, "name": "Морфит"}]}, {}
+        return super().__call__(path, method, body, **params)
+
+
+class TestProjects(unittest.TestCase):
+    """Ведение производства: закреплённый чертёж, склад, вставка из игры, этапы, партии, снимки цен."""
+
+    def setUp(self):
+        self.td = TempDirs()
+        self.calc = ind.Calculator(HistEsi(), DATA)
+        self.pr = ind.Projects(self.calc, os.path.join(self.td.data, "industry_projects.json"))
+        self.s = {"runs": 10, "me": 0, "te": 0, "industry": 0, "adv_industry": 0, "system": "Jita"}
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_parse_stock(self):
+        rows = ind.parse_stock("Tritanium\t1 000 000\tMineral\t\t10 000 m3\nPyerite 25,000\nMexallon x500\n3 x Vexor\n"
+                               "Морфит\t2 000\nTritanium\t5\nDrake*\n\n")
+        self.assertEqual(rows, [("Tritanium", 1000005), ("Pyerite", 25000), ("Mexallon", 500), ("Vexor", 3), ("Морфит", 2000), ("Drake", 1)])
+
+    def test_flow(self):
+        with self.assertRaises(ValueError):
+            self.pr.create("Nothing", self.s)
+        p = self.pr.create("Hobgoblin II", self.s, now=1000)
+        d = self.pr.detail(p, now=1000)
+        self.assertTrue(d["ok"])
+        self.assertEqual({m["name"]: m["left"] for m in d["materials"]}, {"Hobgoblin I": 10, "Morphite": 20, "Nocxium": 100})
+        self.assertEqual(d["totals"]["progress"], 0)
+        self.assertEqual(d["totals"]["left_cost"], 10 * 4000 + 20 * 10000 + 100 * 600)
+        self.assertEqual(len(d["snaps"]), 1)                                 # снимок цен для графика
+        # склад из игры: английские и русские названия, чужое пропускается
+        r = self.pr.paste(p, "Hobgoblin I\t10\nМорфит\t15\nVexor\t1", now=1000)
+        self.assertEqual((r["matched"], r["skipped"]), (2, ["Vexor"]))
+        d = self.pr.detail(p, now=1100)
+        m = {x["name"]: x for x in d["materials"]}
+        self.assertEqual((m["Hobgoblin I"]["left"], m["Morphite"]["left"], m["Morphite"]["have"]), (0, 5, 15))
+        self.assertEqual(d["totals"]["have_cost"], 10 * 4000 + 15 * 10000)
+        self.assertEqual(d["totals"]["ready"], 1)
+        self.assertEqual(len(d["snaps"]), 1)                                 # не чаще раза в час
+        self.pr.paste(p, "Morphite 10\nNocxium 120", mode="add", now=1200)
+        d = self.pr.detail(p, now=5000)
+        self.assertEqual(d["totals"]["progress"], 100.0)
+        self.assertEqual(next(x for x in d["materials"] if x["name"] == "Nocxium")["extra"], 20)
+        self.assertEqual(len(d["snaps"]), 2)
+        # этапы: запуск → готово (материалы списаны, партия записана) → ещё партия
+        self.pr.set_status(p, "building", now=6000)
+        d = self.pr.detail(p, now=6000)
+        self.assertEqual(d["eta"], 6000 + d["totals"]["top_time"])
+        self.pr.toggle_job(p, f"{2456}:0", True)
+        self.assertTrue(self.pr.detail(p, now=6100)["jobs"][0]["done"])
+        self.pr.set_status(p, "done", now=9000)
+        self.assertEqual(p["have"], {"38": 20, "11399": 5})                    # лишнее осталось на складе
+        self.assertEqual(len(p["batches"]), 1)
+        self.assertEqual(p["batches"][0]["units"], 10)
+        self.assertEqual(p["batches"][0]["time"], 3000)
+        self.pr.set_status(p, "collect", now=9100)
+        self.assertEqual((p["status"], p["jobs_done"]), ("collect", []))
+        # сохраняется и читается заново
+        again = ind.Projects(self.calc, self.pr.path)
+        self.assertEqual(again.get(p["id"])["have"], {"38": 20, "11399": 5})
+        self.pr.update_settings(p, {"runs": 2}, "Хобы")
+        self.assertEqual((p["settings"]["runs"], p["name"]), (2, "Хобы"))
+        self.assertEqual(self.pr.summary(p, now=9200)["units"], 2)
+        self.assertTrue(self.pr.delete(p["id"]))
+        self.assertIsNone(self.pr.get(p["id"]))
+
+    def test_price_series_cached(self):
+        ser = self.pr.price_series("jita", 2456, now=100)
+        self.assertEqual(len(ser), 20)
+        self.assertEqual(ser[-1], ["2026-10-20", 300020, 290000, 340000, 120])
+        n = len(self.calc.esi.calls)
+        self.pr.price_series("jita", 2456, now=200)
+        self.assertEqual(len(self.calc.esi.calls), n)
+
+
+class TestProjectsHttp(unittest.TestCase):
+    def test_endpoints(self):
+        import http.client
+        import threading
+        from helpers import ctx, elw, make_cfg
+        from test_crash import free_port
+        td = TempDirs()
+        try:
+            port = free_port()
+            cfg = make_cfg(td.logs, web_port=port)
+            app = elw.App(cfg, td.data, elw.Watcher(cfg, td.data), None)
+            srv = elw.make_server(app)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            ind.setup(ctx(app, "industry"))
+
+            def req(path, method="GET", body=None):
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                h = {"Host": f"localhost:{port}"}
+                if method == "POST":
+                    h.update({"Origin": f"http://localhost:{port}", "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/json"})
+                c.request(method, path, body=json.dumps(body) if body is not None else None, headers=h)
+                r = c.getresponse()
+                out = json.loads(r.read())
+                c.close()
+                return out
+
+            r = req("/api/industry/projects", "POST", {"action": "create", "product": "Vexor", "settings": {"runs": 2}})
+            self.assertTrue(r["ok"])
+            pid = r["id"]
+            self.assertEqual([x["name"] for x in req("/api/industry/projects")["projects"]], ["Vexor"])
+            d = req(f"/api/industry/project?id={pid}")
+            self.assertTrue(d["ok"])
+            first = d["materials"][0]
+            self.assertTrue(req("/api/industry/projects", "POST", {"action": "have", "id": pid, "have": {str(first["type_id"]): first["qty"]}})["ok"])
+            d = req(f"/api/industry/project?id={pid}")
+            self.assertEqual(d["materials"][0]["left"], 0)
+            self.assertTrue(req("/api/industry/projects", "POST", {"action": "paste", "id": pid, "text": first["name"] + "\t5", "mode": "add"})["ok"])
+            self.assertTrue(req("/api/industry/projects", "POST", {"action": "status", "id": pid, "status": "building"})["ok"])
+            self.assertFalse(req("/api/industry/projects", "POST", {"action": "status", "id": pid, "status": "nope"})["ok"])
+            self.assertTrue(os.path.exists(os.path.join(td.data, "industry_projects.json")))
+            self.assertTrue(req("/api/industry/projects", "POST", {"action": "delete", "id": pid})["ok"])
+            self.assertFalse(req(f"/api/industry/project?id={pid}")["ok"])
+            srv.shutdown()
+            srv.server_close()
+        finally:
+            td.cleanup()

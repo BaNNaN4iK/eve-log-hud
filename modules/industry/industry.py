@@ -933,6 +933,315 @@ class History:
 
 
 # ---------------------------------------------------------------------------
+# Ведение производства: закреплённые чертежи, что есть на складе, что докупить, ход работ, история цен
+# ---------------------------------------------------------------------------
+
+PROJECT_STATUSES = ("collect", "building", "done")
+PROJECT_MAX = 50
+PROJECT_SNAP = 3600                    # снимок себестоимости и цены продукта для графика — не чаще раза в час
+PROJECT_SNAPS = 400
+SERIES_TTL = 6 * 3600
+QTY_MAX = 10 ** 12
+_SEP = re.compile(r"[\s  ',.]")
+
+
+def _qty(text: str) -> Optional[int]:
+    s = _SEP.sub("", text or "")
+    return int(s) if s.isdigit() and int(s) <= QTY_MAX else None
+
+
+def parse_stock(text: str) -> List[Tuple[str, int]]:
+    """Склад, вставленный из игры: «Название<Tab>Количество<Tab>…» (копия списка ангара), «Название 1000»,
+    «Название x1000», «1000 x Название». Строка без количества — 1 шт. Одинаковые названия складываются."""
+    got: Dict[str, int] = {}
+    order: List[str] = []
+    for raw in (text or "").splitlines()[:2000]:
+        line = raw.strip()
+        if not line:
+            continue
+        name, qty = None, None
+        cols = [c.strip() for c in line.split("\t")]
+        if len(cols) > 1 and cols[0]:
+            name, qty = cols[0], _qty(cols[1]) if cols[1] else 1
+        if qty is None:
+            m = re.match(r"^(.+?)\s+[x×х*]?\s*(\d[\d\s  ',.]*)$", line) or None
+            if m and _qty(m.group(2)) is not None:
+                name, qty = m.group(1).strip(), _qty(m.group(2))
+            else:
+                m = re.match(r"^(\d[\d\s  ',.]*?)\s*[x×х*]?\s+(.+)$", line)
+                if m and _qty(m.group(1)) is not None:
+                    name, qty = m.group(2).strip(), _qty(m.group(1))
+                else:
+                    name, qty = line, 1
+        name = name.rstrip("*").strip()                          # «*» — предмет в ремонте/сборке
+        if not name or qty is None:
+            continue
+        key = name.casefold()
+        if key not in got:
+            order.append(name)
+            got[key] = 0
+        got[key] += qty
+    return [(n, got[n.casefold()]) for n in order]
+
+
+class Projects:
+    """Закреплённые чертежи: настройки расчёта, сколько материалов уже есть, ход работ и снимки цен."""
+
+    def __init__(self, calc: "Calculator", path: str = "", write: Optional[Callable] = None):
+        self.calc = calc
+        self.path = path
+        self.write = write
+        self.lock = threading.Lock()
+        self.series: Dict[Tuple[int, int], Tuple[float, list]] = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            self.items: List[dict] = d if isinstance(d, list) else []
+        except (OSError, ValueError):
+            self.items = []
+
+    def save(self) -> None:
+        if not self.path:
+            return
+        with self.lock:
+            snap = json.loads(json.dumps(self.items))
+        if self.write is not None:
+            self.write(self.path, snap)
+        else:
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump(snap, f, ensure_ascii=False)
+
+    def get(self, pid: str) -> Optional[dict]:
+        return next((p for p in self.items if p.get("id") == pid), None)
+
+    def create(self, product: str, settings: Optional[dict], name: str = "", now: Optional[float] = None) -> dict:
+        now = time.time() if now is None else now
+        tid = self.calc.find(product)
+        if tid is None or str(tid) not in self.calc.data["bp"]:
+            raise ValueError("Не нашёл, что строить — выберите из подсказки.")
+        if len(self.items) >= PROJECT_MAX:
+            raise ValueError(f"Закреплено уже {PROJECT_MAX} чертежей — удалите ненужные.")
+        s = clean_settings(settings)
+        pid = f"{int(now * 1000):x}"
+        while self.get(pid):
+            pid += "a"
+        p = {"id": pid, "type_id": tid, "product": self.calc.name(tid), "name": (name or "").strip()[:80] or self.calc.name(tid),
+             "settings": s, "have": {}, "jobs_done": [], "status": "collect", "created": int(now), "started": None,
+             "finished": None, "snaps": [], "batches": [], "log": [[int(now), "Чертёж закреплён"]]}
+        with self.lock:
+            self.items.insert(0, p)
+        self.save()
+        return p
+
+    def _log(self, p: dict, text: str, now: float) -> None:
+        p["log"] = (p.get("log") or [])[-99:] + [[int(now), text[:200]]]
+
+    def detail(self, p: dict, now: Optional[float] = None, snap: bool = True) -> dict:
+        """Расчёт проекта: материалы (нужно / есть / осталось / докупить), работы, итоги, время."""
+        now = time.time() if now is None else now
+        res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
+        if not res.get("ok"):
+            return res
+        have = p.get("have") or {}
+        mats, need_cost, have_cost, left_cost, left_vol, ready = [], 0.0, 0.0, 0.0, 0.0, 0
+        priced = res.get("prices")
+        for r in res["shopping"]:
+            h = int(have.get(str(r["type_id"]), 0))
+            use = min(h, r["qty"])
+            left = r["qty"] - use
+            price = r["price"]
+            vol1 = r["volume"] / r["qty"] if r["qty"] else 0
+            row = dict(r, have=h, left=left, extra=max(0, h - r["qty"]), pct=round(100 * use / r["qty"], 1) if r["qty"] else 100.0,
+                       have_cost=use * price if price is not None else None, left_cost=left * price if price is not None else None,
+                       left_volume=left * vol1)
+            mats.append(row)
+            if price is not None:
+                need_cost += r["qty"] * price
+                have_cost += use * price
+                left_cost += left * price
+            left_vol += left * vol1
+            ready += 1 if left == 0 else 0
+        total_qty = sum(r["qty"] for r in mats) or 1
+        progress_value = round(100 * have_cost / need_cost, 1) if priced and need_cost else round(
+            100 * sum(min(r["have"], r["qty"]) for r in mats) / total_qty, 1)
+        done = set(p.get("jobs_done") or [])
+        jobs = []
+        for i, j in enumerate(res["jobs"]):
+            key = f"{j['type_id']}:{j['depth']}"
+            jobs.append(dict(j, key=key, done=key in done))
+        t = res["totals"]
+        cs = (res.get("compare") or {}).get(p["settings"].get("sell_mode") if p["settings"].get("sell_mode") in ("sell", "buy") else "sell") or {}
+        # ход работ: главная работа запущена — когда будет готово
+        eta = None
+        if p.get("status") == "building" and p.get("started"):
+            left_jobs = sum(j["time"] for j in jobs if not j["done"] and j["depth"] > 0)
+            eta = p["started"] + (t.get("top_time") or 0) + left_jobs
+        out = {
+            "ok": True, "project": {k: v for k, v in p.items() if k not in ("snaps",)}, "calc": {
+                "product": res["product"], "settings": res["settings"], "market_name": res["market_name"], "warning": res["warning"],
+                "cost_index": res["cost_index"], "system": res["system"], "missing_price": res["missing_price"], "compare": res["compare"]},
+            "materials": mats, "jobs": jobs, "prices": priced,
+            "totals": dict(t, need_cost=need_cost if priced else None, have_cost=have_cost if priced else None,
+                           left_cost=left_cost if priced else None, left_volume=left_vol, progress=progress_value,
+                           ready=ready, positions=len(mats), jobs_done=sum(1 for j in jobs if j["done"]), jobs_total=len(jobs),
+                           # прибыль, если докупить недостающее; уже купленное — по рыночной цене (могли бы продать)
+                           profit=cs.get("profit"), margin=cs.get("margin"), revenue=cs.get("revenue"), fees=cs.get("fees"),
+                           isk_hour=cs.get("isk_hour")),
+            "eta": eta, "now": int(now), "snaps": p.get("snaps") or [],
+        }
+        if snap and priced and t.get("cost") is not None:
+            snaps = p.get("snaps") or []
+            if not snaps or now - snaps[-1][0] >= PROJECT_SNAP:
+                p["snaps"] = (p.get("snaps") or [])[-(PROJECT_SNAPS - 1):] + [[int(now), round(t["cost"], 2),
+                                                                             round(t["per_unit"] or 0, 2),
+                                                                             res["product"]["price"], round(left_cost, 2)]]
+                out["snaps"] = p["snaps"]
+                self.save()
+        return out
+
+    def summary(self, p: dict, now: Optional[float] = None) -> dict:
+        try:
+            d = self.detail(p, now)
+        except Exception as e:                                  # нет сети и т. п. — карточка без цифр
+            d = {"ok": False, "message": str(e)}
+        base = {"id": p["id"], "name": p["name"], "product": p["product"], "type_id": p["type_id"], "status": p["status"],
+                "runs": p["settings"].get("runs"), "created": p["created"], "started": p.get("started"),
+                "batches": len(p.get("batches") or [])}
+        if not d.get("ok"):
+            return dict(base, error=d.get("message"))
+        t = d["totals"]
+        return dict(base, units=d["calc"]["product"]["units"], progress=t["progress"], left_cost=t["left_cost"], cost=t["cost"],
+                    profit=t["profit"], margin=t["margin"], ready=t["ready"], positions=t["positions"], eta=d["eta"],
+                    time=t.get("top_time"), spark=[s[2] for s in (d["snaps"] or [])[-30:]])
+
+    def price_series(self, market: str, tid: int, now: Optional[float] = None) -> list:
+        """История цены продукта на рынке региона: [дата, средняя, мин, макс, объём] за 90 дней (ESI, кэш 6 ч)."""
+        now = time.time() if now is None else now
+        region = MARKETS[market][1]
+        hit = self.series.get((region, tid))
+        if hit and now - hit[0] < SERIES_TTL:
+            return hit[1]
+        if self.calc.esi is None:
+            return hit[1] if hit else []
+        try:
+            rows, _ = self.calc.esi(f"/markets/{region}/history/", type_id=tid)
+        except Exception:
+            return hit[1] if hit else []
+        rows = sorted(rows or [], key=lambda r: r.get("date", ""))[-90:]
+        out = [[r.get("date", ""), r.get("average"), r.get("lowest"), r.get("highest"), int(r.get("volume") or 0)] for r in rows]
+        self.series[(region, tid)] = (now, out)
+        return out
+
+    # ----- изменения -----
+    def set_have(self, p: dict, have: dict, merge: bool = False) -> None:
+        cur = dict(p.get("have") or {}) if merge else {}
+        for k, v in (have or {}).items():
+            try:
+                tid, q = int(k), int(float(v))
+            except (TypeError, ValueError):
+                continue
+            q = max(0, min(q, QTY_MAX))
+            cur[str(tid)] = cur.get(str(tid), 0) + q if merge else q
+        p["have"] = {k: v for k, v in cur.items() if v > 0}
+
+    def paste(self, p: dict, text: str, mode: str = "set", now: Optional[float] = None) -> dict:
+        """Вставка из игры: найти материалы проекта по названиям (англ. или русским через ESI) и записать количество."""
+        now = time.time() if now is None else now
+        rows = parse_stock(text)
+        if not rows:
+            raise ValueError("Не нашёл ни одной строки с предметом. Скопируйте предметы в игре (Ctrl+A, Ctrl+C) и вставьте сюда.")
+        res = self.calc.calculate(str(p["type_id"]), p["settings"], now)
+        if not res.get("ok"):
+            raise ValueError(res.get("message") or "Расчёт не удался")
+        wanted = {r["name"].casefold(): r["type_id"] for r in res["shopping"]}
+        got: Dict[str, int] = {}
+        unknown = []
+        for name, q in rows:
+            tid = wanted.get(name.casefold())
+            if tid is None:
+                unknown.append((name, q))
+                continue
+            got[str(tid)] = got.get(str(tid), 0) + q
+        if unknown and self.calc.esi is not None:                  # русские названия из клиента на русском
+            try:
+                ids, _ = self.calc.esi("/universe/ids/", "POST", [n for n, _ in unknown][:500], language="ru")
+                by = {e["name"].casefold(): e["id"] for e in (ids or {}).get("inventory_types") or []}
+                need = {r["type_id"] for r in res["shopping"]}
+                rest = []
+                for name, q in unknown:
+                    tid = by.get(name.casefold())
+                    if tid in need:
+                        got[str(tid)] = got.get(str(tid), 0) + q
+                    else:
+                        rest.append((name, q))
+                unknown = rest
+            except Exception:
+                pass
+        if mode == "set":
+            self.set_have(p, got)
+        else:
+            self.set_have(p, got, merge=True)
+        self._log(p, f"Склад из игры: {len(got)} материалов" + (" (добавлено)" if mode != "set" else ""), now)
+        self.save()
+        return {"matched": len(got), "skipped": [n for n, _ in unknown][:30], "lines": len(rows)}
+
+    def set_status(self, p: dict, status: str, consume: bool = True, now: Optional[float] = None) -> None:
+        now = time.time() if now is None else now
+        if status not in PROJECT_STATUSES:
+            raise ValueError("Неизвестный этап")
+        if status == "building":
+            p["started"], p["finished"] = int(now), None
+            self._log(p, "Производство запущено", now)
+        elif status == "done":
+            d = self.detail(p, now, snap=False)
+            t = d.get("totals") or {}
+            p["finished"] = int(now)
+            p["batches"] = (p.get("batches") or [])[-199:] + [{
+                "t": int(now), "units": (d.get("calc") or {}).get("product", {}).get("units"), "cost": t.get("cost"),
+                "per_unit": t.get("per_unit"), "price": (d.get("calc") or {}).get("product", {}).get("price"),
+                "profit": t.get("profit"), "time": (now - p["started"]) if p.get("started") else None}]
+            if consume:                                          # материалы ушли в работу — списать со склада
+                have = dict(p.get("have") or {})
+                for r in d.get("materials") or []:
+                    left = have.get(str(r["type_id"]), 0) - r["qty"]
+                    if left > 0:
+                        have[str(r["type_id"])] = left
+                    else:
+                        have.pop(str(r["type_id"]), None)
+                p["have"] = have
+            self._log(p, "Готово" + (f": {(d.get('calc') or {}).get('product', {}).get('units')} шт." if d.get("ok") else ""), now)
+        else:
+            p["started"] = p["finished"] = None
+            p["jobs_done"] = []
+            self._log(p, "Новая партия: сбор материалов", now)
+        p["status"] = status
+        self.save()
+
+    def toggle_job(self, p: dict, key: str, done: bool) -> None:
+        cur = set(p.get("jobs_done") or [])
+        (cur.add if done else cur.discard)(str(key)[:40])
+        p["jobs_done"] = sorted(cur)
+        self.save()
+
+    def update_settings(self, p: dict, settings: dict, name: Optional[str] = None, now: Optional[float] = None) -> None:
+        p["settings"] = clean_settings(dict(p["settings"], **settings))
+        if name is not None and name.strip():
+            p["name"] = name.strip()[:80]
+        self._log(p, f"Настройки: {p['settings']['runs']} прог., ME {p['settings']['me']} / TE {p['settings']['te']}",
+                  time.time() if now is None else now)
+        self.save()
+
+    def delete(self, pid: str) -> bool:
+        with self.lock:
+            n = len(self.items)
+            self.items = [p for p in self.items if p.get("id") != pid]
+            changed = len(self.items) != n
+        if changed:
+            self.save()
+        return changed
+
+
+# ---------------------------------------------------------------------------
 # Подключение к трекеру
 # ---------------------------------------------------------------------------
 
@@ -1142,6 +1451,73 @@ def setup(ctx) -> None:
             return {"ok": False, "message": str(e)}
         return {"ok": True, "plans": cur[:100]}
 
+    projects = Projects(calc, os.path.join(ctx.data_dir, "industry_projects.json"), ctx.core.atomic_write_json)
+
+    def icons(ids):
+        if ctx.online is not None and ids:
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in list(ids)[:120]], name="industry-icons", daemon=True).start()
+
+    def projects_list(qs):
+        rows = [projects.summary(p) for p in list(projects.items)]
+        icons([r["type_id"] for r in rows])
+        return {"ok": True, "projects": rows, "prices": ctx.online is not None}
+
+    def project_get(qs):
+        p = projects.get((qs.get("id") or [""])[0])
+        if p is None:
+            return {"ok": False, "message": "Такого проекта нет — возможно, его удалили."}
+        try:
+            d = projects.detail(p)
+        except Exception as e:
+            ctx.log.warning("Производство: проект не посчитан: %s", e)
+            return {"ok": False, "message": f"Не удалось посчитать: {e}"}
+        if d.get("ok"):
+            market = d["calc"]["settings"]["market"]
+            d["series"] = projects.price_series(market, p["type_id"]) if (qs.get("series") or ["1"])[0] == "1" else None
+            icons([p["type_id"]] + [m["type_id"] for m in d["materials"]] + [j["type_id"] for j in d["jobs"]])
+        return d
+
+    def projects_post(body, qs=None):
+        if not isinstance(body, dict):
+            return {"ok": False, "message": "Неверный запрос"}
+        action = body.get("action")
+        try:
+            if action == "create":
+                if not isinstance(body.get("product"), str):
+                    return {"ok": False, "message": "Укажите, что строить."}
+                p = projects.create(body["product"], body.get("settings") if isinstance(body.get("settings"), dict) else None,
+                                    str(body.get("name") or ""))
+                return {"ok": True, "id": p["id"], "message": f"Закреплено: {p['name']}"}
+            p = projects.get(str(body.get("id") or ""))
+            if p is None:
+                return {"ok": False, "message": "Такого проекта нет — возможно, его удалили."}
+            if action == "have":
+                projects.set_have(p, dict(p.get("have") or {}, **(body.get("have") if isinstance(body.get("have"), dict) else {})))
+                projects.save()
+            elif action == "paste":
+                r = projects.paste(p, str(body.get("text") or "")[:200_000], "add" if body.get("mode") == "add" else "set")
+                return {"ok": True, **r}
+            elif action == "clear":
+                p["have"] = {}
+                projects.save()
+            elif action == "status":
+                projects.set_status(p, str(body.get("status") or ""), consume=body.get("consume") is not False)
+            elif action == "job":
+                projects.toggle_job(p, str(body.get("key") or ""), bool(body.get("done")))
+            elif action == "settings":
+                projects.update_settings(p, body.get("settings") if isinstance(body.get("settings"), dict) else {},
+                                         str(body["name"]) if isinstance(body.get("name"), str) else None)
+            elif action == "delete":
+                projects.delete(p["id"])
+            else:
+                return {"ok": False, "message": "Неизвестное действие"}
+        except ValueError as e:
+            return {"ok": False, "message": str(e)}
+        return {"ok": True}
+
+    ctx.get("/api/industry/projects", projects_list)
+    ctx.get("/api/industry/project", project_get)
+    ctx.post("/api/industry/projects", projects_post)
     ctx.get("/api/industry/catalog", catalog)
     ctx.post("/api/industry/plan", plan)
     ctx.get("/api/industry/plans", plans)
