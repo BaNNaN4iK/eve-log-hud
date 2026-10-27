@@ -482,6 +482,21 @@ class TestProjects(unittest.TestCase):
             PRICES.clear()
             PRICES.update(old)
 
+    def test_market_groups_and_ru_search(self):
+        data = json.loads(json.dumps({k: v for k, v in DATA.items() if k != "index"}))
+        data.update({"mg": {"4": [None, "Корабли", "Ships"], "1367": [4, "Крейсеры", "Cruisers"]}, "pmg": {"2456": 1367}, "ru": {"2456": "Хобгоблин II"}})
+        path = os.path.join(self.td.data, "d.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        try:
+            d = ind.load_data(path)
+            calc = ind.Calculator(None, d)
+            self.assertEqual(calc.find("хобгоблин ii"), 2456)                  # русское название — без ESI
+            self.assertEqual([x["name"] for x in calc.search("хобгоб")], ["Hobgoblin II"])
+            self.assertEqual(len(calc.search("hobgoblin")), 2)                  # английское и русское — не дублируются
+        finally:
+            ind.load_data(os.path.join(os.path.dirname(ind.__file__), "industry_data.json"))
+
     def test_price_series_cached(self):
         ser = self.pr.price_series("jita", 2456, now=100)
         self.assertEqual(len(ser), 20)

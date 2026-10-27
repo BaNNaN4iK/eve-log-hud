@@ -4,10 +4,9 @@
   if (!ELW) return;
   var api = ELW.api, esc = ELW.esc, L = ELW.L, table = ELW.table, $ = ELW.$;
   var POST = { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' };
-  var CATS = [['', 'Все'], ['ships', 'Корабли'], ['modules', 'Модули'], ['charges', 'Заряды'], ['drones', 'Дроны'], ['components', 'Компоненты'],
-    ['implants', 'Импланты'], ['structures', 'Структуры'], ['materials', 'Материалы'], ['other', 'Прочее']];
   var TECH = [['', 'любой'], ['bpo', 'T1 / чертёж с рынка'], ['inv', 'T2 / T3 — изобретение'], ['bpc', 'редкие копии']];
-  var P = { built: false, catalog: null, cat: '', tech: '', q: '', items: [], mode: 'full', name: '', res: null, plans: [], week: {}, busy: false };
+  var P = { built: false, catalog: null, groups: {}, tech: '', q: '', items: [], mode: 'full', name: '', res: null, plans: [], week: {}, busy: false, open: {} };
+  try { P.open = JSON.parse(localStorage.getItem('elw.industry.tree.open') || '{}') || {}; } catch (e) { P.open = {}; }
   try {
     var draft = JSON.parse(localStorage.getItem('elw.industry.plan') || '{}');
     if (Array.isArray(draft.items)) P.items = draft.items;
@@ -28,7 +27,11 @@
     var box = $('inPlanView');
     if (!box || P.built) return;
     P.built = true;
-    box.innerHTML = '<section class="panel"><h2>План производства <span class="muted small">несколько продуктов сразу: общие компоненты, закупка, изобретение, остатки</span></h2>' +
+    box.innerHTML = '<div class="pl-layout"><aside class="pl-side panel" aria-label="Чертежи игры">' +
+      '<div class="pl-side-hd"><b>Чертежи</b> <span class="small muted" id="plCnt"></span></div>' +
+      '<input id="plQ" type="search" placeholder="Поиск чертежа: Caracal, Hobgoblin II…" aria-label="Поиск чертежа" spellcheck="false" class="pl-q">' +
+      '<div class="in-chips" id="plTech" style="margin:6px 0"></div><div id="plTree" class="pl-tree" role="tree"></div></aside><div class="pl-main">' +
+      '<section class="panel"><h2>План производства <span class="muted small">несколько продуктов сразу: общие компоненты, закупка, изобретение, остатки</span></h2>' +
       '<div class="in-chips"><input id="plName" placeholder="Название плана" aria-label="Название плана" maxlength="80" ' +
       'style="flex:1 1 220px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px">' +
       '<select id="plSaved" aria-label="Сохранённые планы" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 8px"><option value="">Сохранённые планы…</option></select>' +
@@ -46,11 +49,7 @@
       '<div class="in-chips"><label class="small muted">Сколько фитов <input id="plFitN" value="1" inputmode="numeric" style="width:5em;text-align:right;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px"></label>' +
       '<label class="small"><input type="checkbox" id="plFitShip" checked> с кораблём</label>' +
       '<button type="button" class="btn primary" id="plFitGo">Добавить в план</button></div><div class="small" id="plFitMsg" role="status" aria-live="polite" style="margin-top:6px"></div></details>' +
-      '<details class="in-sec" id="plAdd" data-fold="pl_add"' + (ELW_INDUSTRY.fold('pl_add', 'x', 'x', true).indexOf(' open') > 0 ? ' open' : '') + '><summary>Добавить продукт</summary>' +
-      '<div class="in-chips" style="margin-top:8px"><input id="plQ" type="search" placeholder="Название предмета…" aria-label="Поиск чертежа" spellcheck="false" ' +
-      'style="flex:1 1 260px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px"></div>' +
-      '<div class="in-chips" id="plCats" style="margin-top:8px"></div><div class="in-chips" id="plTech" style="margin-top:6px"></div>' +
-      '<div id="plFound" style="margin-top:8px"></div></details></section><div id="plResult"></div>';
+      '</section><div id="plResult"></div></div></div>';
     $('plName').value = P.name;
     var t = null;
     $('plQ').addEventListener('input', function () { var v = this.value; clearTimeout(t); t = setTimeout(function () { P.q = v; drawFound(); }, 150); });
@@ -79,7 +78,7 @@
       P.items.forEach(function (i) { if (i.id === id) i.qty = v; });
       remember(); calc();
     });
-    api('/api/industry/catalog').then(function (j) { if (j.ok) { P.catalog = j.items; drawItems(); drawFound(); } });
+    api('/api/industry/catalog').then(function (j) { if (j.ok) { P.catalog = j.items; P.groups = j.groups || {}; buildTree(); drawItems(); drawFound(); } });
     loadPlans();
   }
 
@@ -126,10 +125,21 @@
 
   function onClick(e) {
     if (e.target.id === 'plDefaults') { ELW_INDUSTRY.show('proj'); if (ELW_INDUSTRY.projects) ELW_INDUSTRY.projects.defaults(); return; }
-    var b = e.target.closest && e.target.closest('[data-cat],[data-tech],[data-mode],[data-add],[data-del]');
+    var g = e.target.closest && e.target.closest('[data-grp]');
+    if (g) {
+      var gid = g.getAttribute('data-grp');
+      P.open[gid] = !isOpen(gid);
+      try { localStorage.setItem('elw.industry.tree.open', JSON.stringify(P.open)); } catch (er) { }
+      drawFound();
+      var ids = (TREE && TREE.items[gid] || []).map(function (r) { return r[0]; });
+      if (P.open[gid] && ids.length) {                          // иконки чертежей группы — подкачать и показать
+        api('/api/industry/icons', { method: 'POST', headers: POST, body: JSON.stringify({ ids: ids }) }).then(function () { setTimeout(drawFound, 2500); }, function () { });
+      }
+      return;
+    }
+    var b = e.target.closest && e.target.closest('[data-tech],[data-mode],[data-add],[data-del]');
     if (!b) return;
-    if (b.hasAttribute('data-cat')) { P.cat = b.getAttribute('data-cat'); drawFound(); }
-    else if (b.hasAttribute('data-tech')) { P.tech = b.getAttribute('data-tech'); drawFound(); }
+    if (b.hasAttribute('data-tech')) { P.tech = b.getAttribute('data-tech'); drawFound(); }
     else if (b.hasAttribute('data-mode')) { P.mode = b.getAttribute('data-mode'); remember(); drawModes(); if (P.items.length) calc(); }
     else if (b.hasAttribute('data-add')) {
       var id = +b.getAttribute('data-add');
@@ -151,7 +161,7 @@
   }
   function drawItems() {
     $('plCount').textContent = P.items.length ? '(' + P.items.length + ')' : '';
-    if (!P.items.length) { $('plItems').innerHTML = '<p class="small muted">Пока пусто. Найдите продукт ниже и нажмите «+».</p>'; return; }
+    if (!P.items.length) { $('plItems').innerHTML = '<p class="small muted">Пока пусто. Выберите чертёж в панели слева и нажмите «+» — или вставьте фит.</p>'; return; }
     var res = {};
     ((P.res && P.res.products) || []).forEach(function (p) { res[p.type_id] = p; });
     $('plItems').innerHTML = sec('items', 'Продукты <span class="n">(' + P.items.length + ')</span>', table('plProd', P.items.map(function (i) {
@@ -172,22 +182,54 @@
       { k: '', t: '', f: function (r) { return '<button type="button" class="btn" data-del="' + r.id + '" aria-label="Убрать ' + esc(r.name) + '">×</button>'; } }
     ], { rowAttrs: function (r) { return r.profit > 0 ? ' class="in-rgood"' : r.profit < 0 ? ' class="in-rbad"' : ''; } }), true);
   }
+  // ----- дерево чертежей: группы рынка игры, как в окне рынка -----
+  var TREE = null;
+  function buildTree() {
+    var kids = {}, items = {};
+    Object.keys(P.groups).forEach(function (g) { var par = P.groups[g][0] ? String(P.groups[g][0]) : ''; (kids[par] = kids[par] || []).push(g); });
+    (P.catalog || []).forEach(function (r) { var g = r[5] && P.groups[r[5]] ? String(r[5]) : 'none'; (items[g] = items[g] || []).push(r); });
+    if (items.none) (kids[''] = kids[''] || []).push('none');
+    Object.keys(kids).forEach(function (k) { kids[k].sort(function (a, b) { return gname(a).localeCompare(gname(b), 'ru'); }); });
+    TREE = { kids: kids, items: items };
+  }
+  function gname(g) { return g === 'none' ? 'Нет на рынке' : (P.groups[g] || [0, g])[1]; }
+  function isOpen(g) { return !!P.open[g]; }
+  function pass(r, q) {
+    if (P.tech && !(r[3] === P.tech || (P.tech === 'bpc' && r[3] === 'lp'))) return false;
+    return !q || r[1].toLowerCase().indexOf(q) >= 0 || (r[6] && r[6].toLowerCase().indexOf(q) >= 0);
+  }
   function drawFound() {
-    $('plCats').innerHTML = CATS.map(function (c) { return chip('cat', c[0], c[1], c[0] === P.cat); }).join('');
-    $('plTech').innerHTML = '<span class="small muted">Чертёж:</span>' + TECH.map(function (c) { return chip('tech', c[0], c[1], c[0] === P.tech); }).join('');
-    if (!P.catalog) { $('plFound').innerHTML = '<p class="small muted">Загружаю список чертежей…</p>'; return; }
-    var q = P.q.trim().toLowerCase(), have = {};
+    $('plTech').innerHTML = TECH.map(function (c) { return chip('tech', c[0], c[1], c[0] === P.tech); }).join('');
+    var box = $('plTree');
+    if (!P.catalog || !TREE) { box.innerHTML = '<p class="small muted">Загружаю чертежи…</p>'; return; }
+    var q = P.q.trim().toLowerCase(), have = {}, count = {}, total = 0, shown = 0;
     P.items.forEach(function (i) { have[i.id] = 1; });
-    var rows = P.catalog.filter(function (r) {
-      return (!P.cat || r[2] === P.cat) && (!P.tech || r[3] === P.tech || (P.tech === 'bpc' && r[3] === 'lp')) && (!q || r[1].toLowerCase().indexOf(q) >= 0);
-    });
-    var shown = rows.slice(0, 40);
-    $('plFound').innerHTML = '<div class="small muted" style="margin-bottom:4px">Найдено: ' + L.fmtInt(rows.length) + (rows.length > 40 ? ' (показаны первые 40 — уточните поиск)' : '') + '</div>' +
-      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px">' + shown.map(function (r) {
-        return '<div style="display:flex;align-items:center;gap:6px;background:var(--panel2);border-radius:8px;padding:5px 8px;min-width:0">' +
-          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r[1]) + '">' + esc(r[1]) + '</span>' + srcBadge(r[3]) +
-          (have[r[0]] ? '<span class="in-sub">в плане</span>' : '<button type="button" class="btn" data-add="' + r[0] + '" aria-label="Добавить ' + esc(r[1]) + '">+</button>') + '</div>';
-      }).join('') + '</div>';
+    function cnt(g) {                                          // сколько чертежей в ветке (с учётом поиска и фильтра)
+      if (count[g] !== undefined) return count[g];
+      var n = (TREE.items[g] || []).filter(function (r) { return pass(r, q); }).length;
+      (TREE.kids[g] || []).forEach(function (k) { n += cnt(k); });
+      return (count[g] = n);
+    }
+    (TREE.kids[''] || []).forEach(function (g) { total += cnt(g); });
+    var h = '';
+    function node(g, depth) {
+      var n = cnt(g);
+      if (!n) return;
+      var open = q ? true : isOpen(g);                           // при поиске ветки с находками раскрыты
+      h += '<div class="pl-g" style="padding-left:' + (depth * 14) + 'px"><button type="button" class="pl-gb" data-grp="' + esc(g) + '" role="treeitem" aria-expanded="' + open + '">' +
+        '<span class="pl-arr">' + (open ? '▾' : '▸') + '</span>' + esc(gname(g)) + ' <span class="pl-n">' + n + '</span></button></div>';
+      if (!open) return;
+      (TREE.kids[g] || []).forEach(function (k) { node(k, depth + 1); });
+      (TREE.items[g] || []).filter(function (r) { return pass(r, q); }).forEach(function (r) {
+        if (shown++ > 600) return;
+        h += '<div class="pl-i" style="padding-left:' + ((depth + 1) * 14 + 16) + 'px" title="' + esc(r[1] + (r[6] && r[6] !== r[1] ? ' — ' + r[6] : '')) + '">' +
+          ico(r[0]) + '<span class="pl-in">' + esc(r[1]) + '</span>' + srcBadge(r[3]) +
+          (have[r[0]] ? '<span class="in-sub">в плане</span>' : '<button type="button" class="btn pl-add" data-add="' + r[0] + '" aria-label="Добавить ' + esc(r[1]) + '">+</button>') + '</div>';
+      });
+    }
+    (TREE.kids[''] || []).forEach(function (g) { node(g, 0); });
+    $('plCnt').textContent = q || P.tech ? 'найдено ' + L.fmtInt(total) : L.fmtInt(total);
+    box.innerHTML = h || '<p class="small muted">Ничего не нашлось.</p>';
   }
 
   function calc() {
@@ -299,6 +341,18 @@
     var text = P.res.shopping.map(function (x) { return x.name + ' ' + x.qty; }).join('\n'), msg = $('plCopyMsg');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = 'Скопировано — вставляется в «Купить несколько» на рынке игры.'; }, function () { msg.textContent = 'Не удалось.'; });
   });
+
+  var st = document.createElement('style');
+  st.textContent = '.pl-layout{display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);gap:14px;align-items:start}' +
+    '.pl-side{position:sticky;top:10px;max-height:calc(100vh - 20px);display:flex;flex-direction:column;margin-top:0;padding:10px}.pl-main>.panel:first-child{margin-top:0}' +
+    '.pl-side-hd{display:flex;align-items:baseline;gap:6px;margin-bottom:6px}.pl-q{width:100%;box-sizing:border-box;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 10px}' +
+    '.pl-side .in-chip{padding:3px 8px;font-size:11.5px}.pl-tree{overflow:auto;flex:1;min-height:200px;margin:0 -4px;padding:0 4px}' +
+    '.pl-gb{display:flex;align-items:center;gap:4px;width:100%;text-align:left;background:none;border:0;color:var(--text);font:inherit;font-size:13px;padding:4px 4px;border-radius:6px;cursor:pointer}' +
+    '.pl-gb:hover,.pl-gb:focus{background:var(--panel2);outline:none}.pl-arr{width:12px;color:var(--muted);flex:none}.pl-n{margin-left:auto;font-size:11px;color:var(--muted)}' +
+    '.pl-i{display:flex;align-items:center;gap:5px;font-size:12.5px;padding:2px 4px;border-radius:6px;min-width:0}.pl-i:hover{background:var(--panel2)}.pl-i .in-ico{width:18px;height:18px;margin:0}' +
+    '.pl-in{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pl-add{padding:0 8px;line-height:1.5}' +
+    '@media(max-width:900px){.pl-layout{grid-template-columns:1fr}.pl-side{position:static;max-height:420px}}';
+  document.head.appendChild(st);
 
   window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
   ELW_INDUSTRY.plan = {

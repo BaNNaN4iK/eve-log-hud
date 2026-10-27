@@ -138,6 +138,9 @@ def load_data(path: Optional[str] = None) -> dict:
             except (OSError, ValueError):
                 d = {"bp": {}, "types": {}, "groups": {}}
             d["index"] = {d["types"][k][0].casefold(): int(k) for k in d["bp"] if k in d["types"]}
+            for k, name in (d.get("ru") or {}).items():               # русские названия из справочника — поиск без ESI
+                if k in d["bp"]:
+                    d["index"].setdefault(name.casefold(), int(k))
             _DATA = d
         return _DATA
 
@@ -286,7 +289,12 @@ class Calculator:
             if t in name:
                 out.append((0 if name.startswith(t) else 1, len(name), self.data["types"][str(tid)][0], tid))
         out.sort()
-        return [{"id": x[3], "name": x[2], "kind": self.data["bp"][str(x[3])][1]} for x in out[:limit]]
+        seen, res = set(), []
+        for x in out:                                            # английское и русское название — один предмет
+            if x[3] not in seen:
+                seen.add(x[3])
+                res.append({"id": x[3], "name": x[2], "kind": self.data["bp"][str(x[3])][1]})
+        return res[:limit]
 
     def name(self, tid: int) -> str:
         t = self.data["types"].get(str(tid))
@@ -1695,9 +1703,10 @@ def setup(ctx) -> None:
         for key, bp in data["bp"].items():
             t = data["types"].get(key)
             if t:
-                out.append([int(key), t[0], category_of(data, int(key)), bp[6] if len(bp) > 6 else "bpo", bp[1]])
+                out.append([int(key), t[0], category_of(data, int(key)), bp[6] if len(bp) > 6 else "bpo", bp[1],
+                            (data.get("pmg") or {}).get(key), (data.get("ru") or {}).get(key, "")])
         out.sort(key=lambda r: r[1].casefold())
-        return {"ok": True, "items": out}
+        return {"ok": True, "items": out, "groups": data.get("mg") or {}}
 
     def clean_items(raw) -> List[Tuple[int, int]]:
         items = []
@@ -1865,6 +1874,15 @@ def setup(ctx) -> None:
             return {"ok": False, "message": f"Не удалось построить дерево: {e}"}
 
     ctx.get("/api/industry/project/tree", project_tree)
+    def icons_post(body, qs=None):                               # каталог: иконки раскрытой группы
+        try:
+            ids = [int(x) for x in (body or {}).get("ids") or []][:200]
+        except (TypeError, ValueError, AttributeError):
+            return {"ok": False}
+        icons([i for i in ids if str(i) in data["types"]])
+        return {"ok": True}
+
+    ctx.post("/api/industry/icons", icons_post)
     ctx.post("/api/industry/fit", fit)
     ctx.get("/api/industry/projects", projects_list)
     ctx.get("/api/industry/project", project_get)

@@ -14,14 +14,16 @@
             откуда: "bpo" — оригинал продаётся на рынке, "inv" — копия из изобретения (T2/T3), "bpc" — только редкие копии
    "inv":   {"<чертёж T2>": [чертёж T1, продукт T1, шанс, прогонов_в_копии, [[датакор, кол-во], ...], время_с]},
    "types": {"<type_id>": [name_en, group_id, category_id, объём]},
-   "groups": {"<group_id>": название}}
+   "groups": {"<group_id>": название},
+   "mg":    {"<группа рынка>": [родитель, название_ru, название_en]} — дерево рынка игры (Корабли → Крейсеры → … → Калдарские),
+   "pmg":   {"<продукт>": группа рынка}, "ru": {"<продукт>": название_ru}}
 """
 import datetime
 import json
 import os
 from collections import defaultdict
 
-from eve_sde.models import BlueprintActivity, BlueprintActivityMaterial, BlueprintActivityProduct, ItemGroup, ItemType
+from eve_sde.models import BlueprintActivity, BlueprintActivityMaterial, BlueprintActivityProduct, ItemGroup, ItemMarketGroup, ItemType
 
 OUT = os.environ.get("INDUSTRY_DATA_OUT") or os.path.abspath("industry_data.json")
 KIND = {"manufacturing": "m", "reaction": "r"}
@@ -76,7 +78,24 @@ for tid, en, gid, cat, pvol, vol in ItemType.objects.filter(id__in=used).values_
     groups.add(gid)
 gnames = {str(g): n for g, n in ItemGroup.objects.filter(id__in=groups).values_list("id", "name_en")}
 
+# дерево рынка для каталога чертежей и русские названия продуктов (поиск по-русски)
+pmg, ru = {}, {}
+for tid, mg, name_ru in ItemType.objects.filter(id__in=[int(x) for x in bp]).values_list("id", "market_group_id", "name_ru"):
+    if mg:
+        pmg[str(tid)] = mg
+    if name_ru and name_ru != (types.get(str(tid)) or [None])[0]:     # только настоящие переводы
+        ru[str(tid)] = name_ru
+allmg = {g: (p, r, e) for g, p, r, e in ItemMarketGroup.objects.values_list("id", "parent_group_id", "name_ru", "name_en")}
+mg = {}
+for g in set(pmg.values()):
+    while g and str(g) not in mg and g in allmg:
+        p, r, e = allmg[g]
+        mg[str(g)] = [p, r or e, e]
+        g = p
+
 with open(OUT, "w", encoding="utf-8") as f:
-    json.dump({"v": 1, "built": datetime.date.today().isoformat(), "bp": bp, "inv": inv, "types": types, "groups": gnames},
+    json.dump({"v": 1, "built": datetime.date.today().isoformat(), "bp": bp, "inv": inv, "types": types, "groups": gnames,
+               "mg": mg, "pmg": pmg, "ru": ru},
               f, ensure_ascii=False, separators=(",", ":"))
-print(f"industry_data.json: чертежей {len(bp)}, изобретений {len(inv)}, предметов {len(types)}, {os.path.getsize(OUT) // 1024} КБ")
+print(f"industry_data.json: чертежей {len(bp)}, изобретений {len(inv)}, предметов {len(types)}, групп рынка {len(mg)}, "
+      f"{os.path.getsize(OUT) // 1024} КБ")
