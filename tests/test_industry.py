@@ -456,6 +456,32 @@ class TestProjects(unittest.TestCase):
         plan = self.pr.create("", self.s, "П", now=1000, items=[(2456, 2), (2454, 5)], mode="buy")
         self.assertEqual([r["n"] for r in self.pr.tree(plan, False)], ["Hobgoblin II", "Hobgoblin I"])
 
+    def test_leftovers(self):
+        # продукт из 50 Crystalline Carbonide, а реакция даёт 200 за прогон: строим сами — 150 остаётся
+        data = json.loads(json.dumps(DATA))
+        data["bp"]["9999"] = [9998, "m", 100, 1, [[16670, 50]], 10]
+        data["types"]["9999"] = ["Test Widget", 100, 18, 1.0]
+        data["index"]["test widget"] = 9999
+        global PRICES
+        old = dict(PRICES)
+        PRICES[9999] = 200000
+        try:
+            calc = ind.Calculator(HistEsi(), data)
+            pr = ind.Projects(calc, os.path.join(self.td.data, "lp.json"))
+            p = pr.create("Test Widget", dict(self.s, runs=1, build=[16670], structure="tatara", security="null"), now=1000)
+            d = pr.detail(p, now=1000)
+            left = d["calc"]["leftovers"]
+            self.assertEqual([(r["name"], r["qty"], r["made"]) for r in left], [("Crystalline Carbonide", 150, 200)])
+            self.assertEqual(d["totals"]["leftovers"], 150 * 1000 * 0.9)          # по цене мгновенной продажи
+            base = d["calc"]["compare"]["sell"]
+            self.assertAlmostEqual(base["profit"] - base["leftovers"] + d["totals"]["leftovers"], base["profit"])
+            pr.set_status(p, "building", now=1100)
+            pr.set_status(p, "done", consume=True, now=1200)
+            self.assertEqual(p["have"].get("16670"), 150)                         # остаток — на склад
+        finally:
+            PRICES.clear()
+            PRICES.update(old)
+
     def test_price_series_cached(self):
         ser = self.pr.price_series("jita", 2456, now=100)
         self.assertEqual(len(ser), 20)

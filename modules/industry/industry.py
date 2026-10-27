@@ -615,8 +615,9 @@ def plan_order(calc: "Calculator", items: List[Tuple[int, int]], s: dict, mode: 
         if v <= 0:
             continue
         pr = price(t, "buy")
-        leftovers.append({"type_id": t, "name": calc.name(t), "qty": v, "price": pr, "total": pr * v if pr is not None else None,
-                          "top": t in top})
+        job = next((j for j in jobs if j["type_id"] == t), {})
+        leftovers.append({"type_id": t, "name": calc.name(t), "qty": v, "made": job.get("made"), "price": pr,
+                          "total": pr * v if pr is not None else None, "top": t in top})
         left_total += pr * v if pr is not None else 0
     leftovers.sort(key=lambda r: -(r["total"] or 0))
     revenue = 0.0
@@ -1180,16 +1181,41 @@ class Projects:
                         walk(m["build"], depth + 1)
             walk(res["tree"], 0)
             jobs = [dict(j, key=f"{j['type_id']}:{j['depth']}") for j in res["jobs"]]
-            sm = s.get("sell_mode") if s.get("sell_mode") in ("sell", "buy") else "sell"
-            cs = (res.get("compare") or {}).get(sm) or {}
             t = res["totals"]
+            extra_qty: Dict[int, int] = {}
+            made: Dict[int, int] = {}
+            for m in tree:
+                if m["built"] and m["out"] and m["out"] > m["qty"]:
+                    extra_qty[m["type_id"]] = extra_qty.get(m["type_id"], 0) + m["out"] - m["qty"]
+                    made[m["type_id"]] = made.get(m["type_id"], 0) + m["out"]
+            lp = self.calc.prices(set(extra_qty), s["market"], now) if extra_qty and res["prices"] else {}
+            leftovers = []
+            for tid, q in sorted(extra_qty.items(), key=lambda kv: self.calc.name(kv[0])):
+                pr = (lp.get(tid) or {}).get("buy")
+                leftovers.append({"type_id": tid, "name": self.calc.name(tid), "qty": q, "made": made[tid], "price": pr,
+                                  "total": pr * q if pr is not None else None})
+            leftovers.sort(key=lambda r: -(r["total"] or 0))
+            left_total = sum(r["total"] or 0 for r in leftovers)
+            compare = {}
+            for mode_, c in (res.get("compare") or {}).items():
+                c = dict(c)
+                if c.get("profit") is not None:
+                    c["profit"] += left_total
+                    c["leftovers"] = left_total
+                    c["per_run"] = c["profit"] / res["tree"]["runs"]
+                    c["margin"] = round(c["profit"] * 100 / c["revenue"], 1) if c.get("revenue") else None
+                    c["isk_hour"] = c["profit"] / (t["time"] / 3600) if t["time"] else None
+                compare[mode_] = c
+            sm = s.get("sell_mode") if s.get("sell_mode") in ("sell", "buy") else "sell"
+            cs = compare.get(sm) or {}
             return {"ok": True, "kind": "item", "res": res, "shopping": res["shopping"], "jobs": jobs, "prices": res["prices"],
                     "product": res["product"], "settings": res["settings"], "market_name": res["market_name"],
                     "extra": {"warning": res["warning"], "cost_index": res["cost_index"], "system": res["system"],
-                              "missing_price": res["missing_price"], "compare": res["compare"], "tree": tree},
+                              "missing_price": res["missing_price"], "compare": compare, "tree": tree, "leftovers": leftovers},
                     "totals": {"cost": t["cost"], "per_unit": t["per_unit"], "materials": t["materials"], "jobs": t["jobs"],
                                "revenue": cs.get("revenue"), "fees": cs.get("fees"), "profit": cs.get("profit"), "margin": cs.get("margin"),
-                               "isk_hour": cs.get("isk_hour"), "time": t["time"], "top_time": t["top_time"], "volume": t["volume"]}}
+                               "isk_hour": cs.get("isk_hour"), "time": t["time"], "top_time": t["top_time"], "volume": t["volume"],
+                               "leftovers": left_total if res["prices"] else None}}
         items = [(int(i["id"]), int(i["qty"])) for i in p.get("items") or []]
         res = plan_with_products(self.calc, items, s, mode or p.get("mode", "full"), now)
         t = res["totals"]
@@ -1207,7 +1233,7 @@ class Projects:
                 "extra": {"warning": "", "cost_index": None, "system": "", "missing_price": res["no_price"], "compare": None,
                           "products": res["products"], "invention": res["invention"], "leftovers": res["leftovers"],
                           "mode": res["mode"], "plan_totals": t},
-                "totals": {"cost": t["cost"], "per_unit": t["cost"] / units if t["cost"] is not None else None,
+                "totals": {"cost": t["spend"], "per_unit": t["spend"] / units if t["spend"] is not None else None, "leftovers": t["leftovers"],
                            "materials": t["buy"], "jobs": (t["jobs"] or 0) + (t["invention"] or 0), "revenue": gross,
                            "fees": gross - t["revenue"] if gross is not None and t["revenue"] is not None else None,
                            "profit": t["profit"], "margin": round(t["profit"] * 100 / gross, 1) if t["profit"] is not None and gross else None,
@@ -1328,7 +1354,8 @@ class Projects:
                 raw = {"materials": rows, "totals": dict(rt, progress=rt["progress"] if priced else rt["progress_qty"],
                                                          need_cost=rt["need_cost"] if priced else None,
                                                          left_cost=rt["left_cost"] if priced else None,
-                                                         jobs=rr["totals"]["jobs"], cost=rr["totals"]["cost"],
+                                                         jobs=rr["totals"]["jobs"],
+                                                         cost=rr["totals"]["cost"] - (rr["totals"].get("leftovers") or 0) if rr["totals"]["cost"] is not None else None,
                                                          per_unit=rr["totals"]["per_unit"], time=rr["totals"]["time"],
                                                          minerals=dict(mt2, progress=mt2["progress"] if priced else mt2["progress_qty"]) if mins else None,
                                                          families=self._families(rows, have, priced)),
@@ -1476,6 +1503,13 @@ class Projects:
                     else:
                         have.pop(str(r["type_id"]), None)
                 p["have"] = have
+            left = [r for r in (d.get("calc") or {}).get("leftovers") or [] if not r.get("top")]
+            if left:
+                have = dict(p.get("have") or {})
+                for r in left:
+                    have[str(r["type_id"])] = int(have.get(str(r["type_id"]), 0)) + int(round(r["qty"]))
+                p["have"] = have
+                self._log(p, "Остатки на склад: " + ", ".join(f"{r['name']} ×{int(round(r['qty']))}" for r in left[:5]) + ("…" if len(left) > 5 else ""), now)
             self._log(p, "Готово" + (f": {(d.get('calc') or {}).get('product', {}).get('units')} шт." if d.get("ok") else ""), now)
         else:
             p["started"] = p["finished"] = None

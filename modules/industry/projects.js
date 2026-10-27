@@ -267,7 +267,7 @@
       (d.raw && d.raw.totals.minerals ? tile('Минералы собраны', pct(d.raw.totals.minerals.progress), 'базовые руды · докупить ' + isk(d.raw.totals.minerals.left_cost), d.raw.totals.minerals.progress >= 100 ? 'in-good' : '') : '') +
       (d.raw ? tile('Сырьё собрано', pct(d.raw.totals.progress), 'если строить всё · докупить ' + isk(d.raw.totals.left_cost), d.raw.totals.progress >= 100 ? 'in-good' : '') : '') +
       tile('Себестоимость', isk(t.cost), 'за штуку ' + isk(t.per_unit)) +
-      tile('Прибыль', isk(t.profit), t.margin !== null && t.margin !== undefined ? 'маржа ' + pct(t.margin) : '', cls(t.profit)) +
+      tile('Прибыль', isk(t.profit), (t.margin !== null && t.margin !== undefined ? 'маржа ' + pct(t.margin) : '') + (t.leftovers ? ' · в т.ч. остатки +' + isk(t.leftovers) : ''), cls(t.profit)) +
       (c.kind === 'plan' ? tile('Выручка', isk(t.revenue), 'ROI ' + pct(t.roi)) : tile('Цена продукта', isk(prod.price), 'за штуку · ' + c.market_name)) +
       tile('Время', L.fmtDur(Math.round(t.top_time || 0)), t.jobs_total > 1 ? 'работ готово ' + t.jobs_done + ' из ' + t.jobs_total : '') + '</div>';
 
@@ -307,7 +307,7 @@
         var row = function (k, v, cl) { return '<dt' + (cl ? ' class="' + cl + '"' : '') + '>' + k + '</dt><dd' + (cl ? ' class="' + cl + '"' : '') + '>' + v + '</dd>'; };
         return '<div style="--c:' + color + '"><h3>' + title + '</h3><dl>' + row('Цена продукта', isk(x.price)) + row('Выручка', isk(x.revenue)) +
           row('Налоги и брокер', x.fees === null || x.fees === undefined ? '—' : '−' + isk(x.fees)) + row('Себестоимость', t.cost === null ? '—' : '−' + isk(t.cost)) +
-          row('Прибыль', '<span class="' + cls(x.profit) + '">' + isk(x.profit) + '</span>', 'tot') + row('ISK в час', isk(x.isk_hour)) + row('Маржа', pct(x.margin)) + '</dl></div>';
+          (x.leftovers ? row('Остатки', '+' + isk(x.leftovers)) : '') + row('Прибыль', '<span class="' + cls(x.profit) + '">' + isk(x.profit) + '</span>', 'tot') + row('ISK в час', isk(x.isk_hour)) + row('Маржа', pct(x.margin)) + '</dl></div>';
       };
       h += fold('cmp', 'Продажа: своим ордером и мгновенно', '<div class="in-cmp" style="margin-top:4px">' + col('Своим ордером', c.compare.sell || {}, 'var(--good)') + col('Мгновенно', c.compare.buy || {}, 'var(--accent)') + '</div>');
     }
@@ -321,6 +321,21 @@
             '<td>' + esc(L.fmtInt(m.qty)) + '</td><td>' + (m.buildable ? '<input type="checkbox" data-pj-build="' + m.type_id + '"' + (m.built ? ' checked' : '') + ' aria-label="Строить ' + esc(m.name) + ' самому">' + (m.kind === 'r' ? ' <span class="in-sub">реакция</span>' : '') :
               '<span class="in-sub" title="Для этого материала нет чертежа: его добывают, получают переработкой, на планетах или с NPC">не строится</span>') + '</td></tr>';
         }).join('') + '</tbody></table></div>');
+    }
+    // остатки: прогон даёт целую пачку — лишнее остаётся у вас; его стоимость прибавлена к прибыли
+    var lefts = c.leftovers || [];
+    if (lefts.length) {
+      var ltot = lefts.reduce(function (a, r) { return a + (r.total || 0); }, 0);
+      h += fold('left', 'Остатки производства <span class="n">— ' + lefts.length + ' поз. на ' + isk(ltot) + ' ISK, прибавлены к прибыли</span>',
+        '<div class="small muted" style="margin:2px 0 8px">Прогон чертежа даёт целую пачку, поэтому выходит больше, чем нужно. Лишнее остаётся у вас — продать или пустить в следующую партию. ' +
+        'Оценка — по цене мгновенной продажи; при «Готово» остатки компонентов сами добавляются на склад.</div>' +
+        '<div class="tw"><table><thead><tr><th class="l">Что</th><th>Нужно</th><th>Выйдет</th><th>Остаток</th><th>Цена</th><th>Стоимость</th></tr></thead><tbody>' +
+        lefts.map(function (r) {
+          var made = r.made !== undefined ? r.made : null, need = made !== null ? made - r.qty : null;
+          return '<tr><td class="l">' + ico(r.type_id) + ELW_INDUSTRY.cp(r.name) + (r.top ? ' <span class="sc-badge sure">продукт</span>' : '') + '</td>' +
+            '<td>' + (need !== null ? esc(L.fmtInt(Math.round(need))) : '—') + '</td><td>' + (made !== null ? esc(L.fmtInt(Math.round(made))) : '—') + '</td>' +
+            '<td class="in-good">+' + esc(L.fmtInt(Math.round(r.qty))) + '</td><td>' + esc(isk(r.price)) + '</td><td>' + esc(isk(r.total)) + '</td></tr>';
+        }).join('') + '<tr class="in-rgood"><td class="l"><b>Итого к прибыли</b></td><td></td><td></td><td></td><td></td><td><b>+' + esc(isk(ltot)) + '</b></td></tr></tbody></table></div>');
     }
     // дерево строительства: схема и список (tree.js)
     if (ELW_INDUSTRY.tree) h += fold('treebox', 'Дерево строительства <span class="n">— что из чего строится и что уже собрано</span>', '<div id="pjTree"></div>');
@@ -358,7 +373,7 @@
     h += tools;
     h += fold('mats', 'Материалы <span class="n">— что покупаете по плану: собрано ' + pct(t.progress) + ', докупить ' + isk(t.left_cost) + ' ISK</span>', matTable(d.materials, 'filter'));
     if (d.raw) {
-      var rt = d.raw.totals;
+      var rt = d.raw.totals, netCost = (t.cost || 0) - (t.leftovers || 0);       // обе себестоимости — за вычетом остатков
       h += fold('raw', 'Сырьё <span class="n">— если строить все компоненты самому: собрано ' + pct(rt.progress) + ', докупить ' + isk(rt.left_cost) + ' ISK</span>',
         '<div class="pj-rawbar">' + (rt.families || []).map(function (fm) {
           return '<div class="pj-fam"><span class="pj-fam-n">' + ELW_INDUSTRY.fam(fm.fam, fm.label) + '</span><div class="pj-prog big f-' + esc(fm.fam) + '"><div style="width:' + Math.min(100, fm.progress) + '%"></div><span>' + pct(fm.progress) + ' · ' +
@@ -367,8 +382,8 @@
         '<div class="small muted">Всё сырьё</div><div class="pj-prog big"><div style="width:' + Math.min(100, rt.progress) + '%"></div><span>' + pct(rt.progress) + '</span></div>' +
         '<div class="pj-row"><span>собрано позиций <b>' + rt.ready + ' из ' + rt.positions + '</b> · по количеству <b>' + pct(rt.progress_qty) + '</b></span>' +
         '<span>докупить <b>' + isk(rt.left_cost) + '</b> ISK · ' + L.fmtInt(rt.left_volume) + ' м³</span></div>' +
-        '<div class="pj-row"><span>себестоимость при постройке всего <b>' + isk(rt.cost) + '</b> (работы ' + isk(rt.jobs) + ', ' + d.raw.jobs + ' работ)</span>' +
-        '<span>против покупки компонентов <b class="' + cls((t.cost || 0) - (rt.cost || 0)) + '">' + (rt.cost !== null && t.cost !== null ? ((t.cost - rt.cost) >= 0 ? 'дешевле на ' : 'дороже на ') + isk(Math.abs(t.cost - rt.cost)) : '—') + '</b></span></div></div>' +
+        '<div class="pj-row"><span>себестоимость при постройке всего <b>' + isk(rt.cost) + '</b> <span class="in-sub">за вычетом остатков</span> (работы ' + isk(rt.jobs) + ', ' + d.raw.jobs + ' работ)</span>' +
+        '<span>против покупки компонентов <b class="' + cls(netCost - (rt.cost || 0)) + '">' + (rt.cost !== null && t.cost !== null ? ((netCost - rt.cost) >= 0 ? 'дешевле на ' : 'дороже на ') + isk(Math.abs(netCost - rt.cost)) : '—') + '</b></span></div></div>' +
         rawBars(d.raw.materials) + matTable(d.raw.materials, 'rfilter'));
     }
 
