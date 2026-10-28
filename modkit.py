@@ -136,7 +136,17 @@ class Context:
     # ----- адреса страницы -----
     def get(self, path: str, fn: Callable) -> None:
         """GET path → fn(qs) → dict (200), (код, dict) или Html."""
+        if path == SSO_CALLBACK:                             # общий адрес возврата EVE: модуль без sso() — обработчик по умолчанию
+            self.app.sso_fallback = (self.module.id, fn)
+            _install_sso(self.app)
+            return
         self.app.routes[("GET", path)] = (self.module.id, fn)
+
+    def sso(self, owns: Callable[[str], bool], fn: Callable) -> None:
+        """Свой вход через EVE на общем адресе возврата /sso/callback (у приложения EVE он один).
+        Ответ EVE уйдёт этому модулю, если owns(state) — True (вход начат им); fn(qs) → как у get()."""
+        _install_sso(self.app)
+        self.app.sso_handlers.append((self.module.id, owns, fn))
 
     def post(self, path: str, fn: Callable) -> None:
         """POST path → fn(body, qs): body — разобранный JSON или None."""
@@ -162,6 +172,32 @@ class Context:
 
     def on_stop(self, fn: Callable[[], None]) -> None:
         self.app.stop_hooks.append(fn)
+
+
+SSO_CALLBACK = "/sso/callback"
+
+
+def _install_sso(app) -> None:
+    """Один маршрут /sso/callback на всех: по state ищем модуль, который начал вход."""
+    if not hasattr(app, "sso_handlers"):
+        app.sso_handlers = []
+    if ("GET", SSO_CALLBACK) in app.routes:
+        return
+
+    def dispatch(qs):
+        state = (qs.get("state") or [""])[0]
+        for mid, owns, fn in list(getattr(app, "sso_handlers", [])):
+            try:
+                mine = bool(owns(state))
+            except Exception:
+                mine = False
+            if mine:
+                return fn(qs)
+        fallback = getattr(app, "sso_fallback", None)
+        if fallback:
+            return fallback[1](qs)
+        return 400, {"ok": False, "message": "Вход через EVE начат не из этого приложения."}
+    app.routes[("GET", SSO_CALLBACK)] = ("sso", dispatch)
 
 
 def activate(core, app, root: str, stop: threading.Event) -> List[Module]:

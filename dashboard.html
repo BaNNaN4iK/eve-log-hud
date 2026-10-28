@@ -255,6 +255,7 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
 
     <div role="tabpanel" id="view-bounty" aria-labelledby="tab-bounty" class="hidden">
       <section class="panel"><h2>Итого</h2><div class="tiles" id="bTiles"></div></section>
+      <div id="bExtra"></div>
       <section class="panel"><h2>По дням</h2><div class="chart" id="bChart"></div></section>
       <div class="grid2 gridgap">
         <section class="panel"><h2>По системам</h2><div id="bSystems"></div></section>
@@ -958,7 +959,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       tile('Руда', L.fmtCompact(T.ore_total) + ' ед.', oreM3 ? L.fmtCompact(oreM3) + ' м³' : '', 'ore') +
       tile('Стоимость руды', oreIsk ? L.fmtIsk(oreIsk) : '—', priceModeName(), 'ore') +
       (T.refl ? tile('Отражено', L.fmtCompact(T.refl), 'урон по неуязвимым целям') : '') +
-      (T.unparsed ? tile('Нераспознано строк', L.fmtInt(T.unparsed), 'см. вкладку «Нераспознанное»') : '');
+      (T.unparsed ? tile('Нераспознано строк', L.fmtInt(T.unparsed), 'см. вкладку «Нераспознанное»') : '') +
+      hookParts('overview', sel, T).tiles;
     var info = METRIC_INFO[S.metric] || METRIC_INFO.out;
     barChart($('mainChart'), L.buckets(sel.list, sel.range, S.metric, CTX), info);
     var wr = L.entries(T.weapons, 'dmg').slice(0, 8);
@@ -1158,6 +1160,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       tile('В час', hours > 0 ? L.fmtIsk(T.bounty / hours) : '—', 'по сессиям с баунти') +
       tile('Сессий с баунти', L.fmtInt(withB.length), withB.length ? 'в среднем ' + L.fmtIsk(T.bounty / withB.length) : '') +
       tile('Среднее начисление', T.bounty_n ? L.fmtIsk(T.bounty / T.bounty_n) : '—', '');
+    var extra = hookParts('bounty', sel, T);                    // модули (выплаты ESS): плитки и свой блок
+    if (extra.tiles) $('bTiles').innerHTML += extra.tiles;
+    $('bExtra').innerHTML = extra.html;
     barChart($('bChart'), L.buckets(sel.list, sel.range, 'bounty', CTX), METRIC_INFO.bounty);
     $('bSystems').innerHTML = systemsTable('bs', { systems: filterSys(T.systems, 'bounty') }, ['bounty', 'time', 'sessions']);
     var top = L.sortBy(withB, 'bounty', -1).slice(0, 15);
@@ -1167,6 +1172,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       { k: 'dur', t: 'Длит.', f: function (r) { return L.fmtDur(r.dur); } },
       { k: 'bounty', t: 'Баунти', f: function (r) { return L.fmtIsk(r.bounty); } }
     ], { rowAttrs: rowOpen, empty: 'Баунти за период не было' });
+  }
+  // точки расширения для модулей: ELW.hook('overview' | 'bounty', fn(sel, T) → {tiles, html})
+  var HOOKS = {};
+  function hookParts(name, sel, T) {
+    var out = { tiles: '', html: '' };
+    (HOOKS[name] || []).forEach(function (fn) {
+      try { var r = fn(sel, T) || {}; out.tiles += r.tiles || ''; out.html += r.html || ''; } catch (e) { console.error('Модуль: точка «' + name + '»:', e); }
+    });
+    return out;
   }
   function rowOpen(r) { return ' class="click" tabindex="0" role="button" data-open="' + esc(r.id) + '" aria-label="Открыть сессию ' + esc(r.who + ' ' + L.fmtDateTime(r.t0)) + '"'; }
 
@@ -1407,7 +1421,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     return panel;
   }
   window.ELW = { api: api, esc: esc, L: L, table: table, empty: empty, icon: icon, tile: tile, $: $, S: S,
-                 render: render, addTab: addTab, base: BASE, version: 1 };
+                 render: render, addTab: addTab, base: BASE, version: 1,
+                 hook: function (name, fn) { (HOOKS[name] = HOOKS[name] || []).push(fn); } };
   function loadModules() {
     if (AA_MODE) return Promise.resolve();
     return api('/api/modules').then(function (j) {
