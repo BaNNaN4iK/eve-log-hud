@@ -112,6 +112,9 @@ class TestSsoDispatch(unittest.TestCase):
             app.cfg["esi_main_client_id"] = ""
             self.assertFalse(app.routes[("POST", "/api/eve/client")][1]({"client_id": "nope"})["ok"])
             self.assertTrue(app.routes[("POST", "/api/eve/client")][1]({"client_id": "a" * 32})["ok"])
+            self.assertTrue(app.routes[("POST", "/api/eve/client")][1]({"scopes": [ALL[0], "bogus"]})["ok"])   # только то, что включено в приложении
+            self.assertEqual(auth.scopes, [ALL[0]])
+            self.assertFalse(app.routes[("POST", "/api/eve/client")][1]({"scopes": []})["ok"])
             self.assertTrue(app.routes[("POST", "/api/eve/login")][1]({})["ok"])
             state = next(iter(auth.pending))
             mid, route = app.routes[("GET", "/sso/callback")]
@@ -120,7 +123,8 @@ class TestSsoDispatch(unittest.TestCase):
             self.assertEqual(res.code, 400)
             st = app.routes[("GET", "/api/eve/status")][1]({})
             self.assertTrue(st["client_id_set"])
-            self.assertEqual(len(st["scopes"]), len(ALL))
+            self.assertEqual(len(st["all_scopes"]), len(ALL))
+            self.assertEqual([x[0] for x in st["scopes"]], [ALL[0]])
         finally:
             td.cleanup()
 

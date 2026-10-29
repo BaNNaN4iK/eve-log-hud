@@ -1555,7 +1555,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       'style="flex:0 1 330px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:13px ui-monospace,Consolas,monospace">' +
       '<button type="button" class="btn" id="eveCidSave">Сохранить</button>' +
       (d.client_id_set ? '<button type="button" class="btn primary" id="eveLogin">Подключить персонажа</button>' : '') + '</div>';
-    if (d.client_id_set) h += '<div class="muted" style="margin:4px 0">Доступы: ' + d.scopes.map(function (s) { return esc(s[1]); }).join(', ') + ' · адрес возврата <code>' + esc(d.callback) + '</code></div>';
+    h += '<div style="margin:6px 0 2px">Какие доступы отмечены в приложении EVE (программа запросит ровно их — лишний доступ EVE отклонит с ошибкой invalid_scope):</div>' +
+      '<div class="controls" id="eveScopes">' + d.all_scopes.map(function (s) {
+        return '<label title="' + esc(s[0]) + '"><input type="checkbox" value="' + esc(s[0]) + '"' + (s[2] ? ' checked' : '') + '> ' + esc(s[1]) + '</label>'; }).join('') +
+      '<button type="button" class="btn" id="eveScopesSave">Сохранить доступы</button></div>' +
+      '<div class="muted" style="margin:2px 0 4px">Адрес возврата <code>' + esc(d.callback) + '</code></div>';
     h += d.chars.length ? '<div class="controls" style="margin-top:6px">' + d.chars.map(function (c) {
       return '<span style="background:var(--panel2);border-radius:7px;padding:4px 8px">' + esc(c.name) +
         (c.missing.length ? ' <span style="color:var(--warn)" title="Подключите заново, чтобы дать: ' + esc(c.missing.join(', ')) + '">⚠ нет: ' + esc(c.missing.join(', ')) + '</span>' : ' <span class="muted">все доступы</span>') +
@@ -1571,6 +1575,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
   }
   $('eveBody').addEventListener('click', function (e) {
     if (e.target.id === 'eveCidSave') evePost('/api/eve/client', { client_id: $('eveCid').value }, 'Сохраняю…');
+    else if (e.target.id === 'eveScopesSave') evePost('/api/eve/client', { scopes: [].slice.call(document.querySelectorAll('#eveScopes input:checked')).map(function (x) { return x.value; }) }, 'Сохраняю…');
     else if (e.target.id === 'eveLogin') evePost('/api/eve/login', {}, 'Открываю вход EVE…');
     else if (e.target.getAttribute('data-eve-out') && confirm('Отключить персонажа? Его токен «данные персонажа» будет удалён с этого компьютера.')) evePost('/api/eve/logout', { id: +e.target.getAttribute('data-eve-out') });
   });

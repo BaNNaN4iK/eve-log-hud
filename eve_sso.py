@@ -236,6 +236,7 @@ class Auth:
 
     def status(self) -> dict:
         return {"client_id_set": bool(self.client_id), "client_id": self.client_id, "scopes": [[s, SCOPE_NAMES.get(s, s)] for s in self.scopes],
+                "all_scopes": [[s, SCOPE_NAMES.get(s, s), s in self.scopes] for s in SCOPES],
                 "chars": [{"id": k, "name": v["name"], "missing": [SCOPE_NAMES.get(s, s) for s in self.scopes if s not in (v.get("scopes") or [])]}
                           for k, v in self.chars.items()]}
 
@@ -254,7 +255,8 @@ def install(app, write: Callable, open_url: Optional[Callable] = None) -> Auth:
     import html
     import modkit
     cfg = app.cfg
-    auth = Auth(app.data_dir, cfg.get("esi_main_client_id") or BUILTIN_CLIENT_ID, write)
+    chosen = [x for x in (cfg.get("esi_main_scopes") or SCOPES) if x in SCOPES] or list(SCOPES)
+    auth = Auth(app.data_dir, cfg.get("esi_main_client_id") or BUILTIN_CLIENT_ID, write, scopes=chosen)
     redirect = f"http://localhost:{app.port}/sso/callback"
     hooks = []                                                # модули: новый персонаж подключён (например, сразу обновить кошелёк)
     if open_url is None:
@@ -273,7 +275,8 @@ def install(app, write: Callable, open_url: Optional[Callable] = None) -> Auth:
             except SsoError as e:
                 ok, text = False, str(e)
                 if "invalid_scope" in text:
-                    text += " — в приложении на developers.eveonline.com включите все доступы, перечисленные в «Настройках»."
+                    text += (" — этот доступ не включён в приложении EVE. Либо включите его на developers.eveonline.com, "
+                             "либо снимите галочку с него в «Настройках» → «Персонажи EVE» и войдите снова.")
         return modkit.Html(200 if ok else 400, CALLBACK_PAGE % ("#18bc9c" if ok else "#e74c3c", "Готово" if ok else "Вход не выполнен", html.escape(text)))
 
     def status(qs):
@@ -299,16 +302,23 @@ def install(app, write: Callable, open_url: Optional[Callable] = None) -> Auth:
         return {"ok": True, "message": "Персонаж отключён, его токен удалён с этого компьютера."}
 
     def set_client(body, qs=None):
-        cid = str((body or {}).get("client_id") or "").strip() if isinstance(body, dict) else ""
-        if not re.fullmatch(r"[0-9a-fA-F]{32}", cid):
-            return {"ok": False, "message": "Client ID — это 32 знака: цифры и буквы a–f. Скопируйте его со страницы приложения."}
+        """Client ID и какие доступы включены в приложении EVE (запрашиваем ровно их — иначе EVE отклонит вход: invalid_scope)."""
+        body = body if isinstance(body, dict) else {}
         path = os.path.join(app.data_dir, "config.json")
         user = _read(path, {})
         user = user if isinstance(user, dict) else {}
-        user["esi_main_client_id"] = cid
+        if "client_id" in body:
+            cid = str(body.get("client_id") or "").strip()
+            if not re.fullmatch(r"[0-9a-fA-F]{32}", cid):
+                return {"ok": False, "message": "Client ID — это 32 знака: цифры и буквы a–f. Скопируйте его со страницы приложения."}
+            user["esi_main_client_id"] = cfg["esi_main_client_id"] = auth.client_id = cid
+        if isinstance(body.get("scopes"), list):
+            sc = [x for x in SCOPES if x in body["scopes"]]
+            if not sc:
+                return {"ok": False, "message": "Отметьте хотя бы один доступ."}
+            user["esi_main_scopes"] = cfg["esi_main_scopes"] = auth.scopes = sc
         write(path, user)
-        cfg["esi_main_client_id"] = auth.client_id = cid
-        return {"ok": True, "message": "Client ID сохранён."}
+        return {"ok": True, "message": "Сохранено."}
 
     modkit._install_sso(app)
     app.sso_handlers.append(("core", auth.owns, callback))
