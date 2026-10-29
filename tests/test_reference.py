@@ -48,5 +48,30 @@ class TestOres(unittest.TestCase):
         self.assertNotIn("Veldspar 0-Grade", ores)
 
 
+
+class TestBlueprints(unittest.TestCase):
+    def test_sources_from_game_data(self):
+        d = ref.load_bp()
+        self.assertGreater(len(d["bp"]), 4000)
+        cat = ref.bp_catalog(d)
+        self.assertEqual(len(cat["items"]), len(d["bp"]))
+        by = {r[1]: str(r[0]) for r in cat["items"]}
+        car = ref.bp_detail(d, by["Caracal"])
+        self.assertEqual(car["sources"], ["market"])                       # T1 — оригинал у NPC
+        self.assertEqual(car["market_path"][-1], "Калдарские")
+        self.assertTrue(car["materials"] and car["base_price"] > 0)
+        hob = ref.bp_detail(d, by["Hobgoblin II"])
+        self.assertEqual(hob["sources"], ["inv"])                          # T2 — изобретение из копии T1
+        self.assertEqual(hob["invention"][0]["source_name"], "Hobgoblin I Blueprint")
+        self.assertEqual(len(hob["invention"][0]["datacores"]), 2)
+        tengu = ref.bp_detail(d, by["Tengu"])
+        self.assertEqual(tengu["sources"], ["rev"])                        # T3 — из реликвий
+        self.assertTrue(all(x["relic"] for x in tengu["invention"]))
+        cni = ref.bp_detail(d, by["Caracal Navy Issue"])
+        self.assertIn("lp", cni["sources"])                                # фракционная копия — LP-магазин
+        self.assertTrue(cni["lp"] and cni["lp"][0]["corps"] and cni["lp"][0]["lp"] > 0)
+        self.assertIsNone(ref.bp_detail(d, "0"))
+
+
 if __name__ == "__main__":
     unittest.main()

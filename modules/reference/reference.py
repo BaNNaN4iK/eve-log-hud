@@ -179,6 +179,70 @@ def ore_table(data: dict, prices: Optional[Dict[int, float]] = None) -> dict:
             "cats": [[k, v[0]] for k, v in CATS.items()] + [["special", "Особая"]]}
 
 
+# ---------------------------------------------------------------------------
+# Чертежи: что производит и как получить
+# ---------------------------------------------------------------------------
+
+def load_bp(path: Optional[str] = None) -> dict:
+    try:
+        with open(path or os.path.join(HERE, "reference_bp.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"bp": {}, "inv": {}, "lp": {}, "corps": {}, "mg": {}, "pmg": {}, "types": {}}
+
+
+def bp_sources(d: dict, b: str) -> List[str]:
+    """Способы получения: market — оригинал продают NPC; inv — изобретение (T2); rev — реверс-инжиниринг из реликвий (T3);
+    lp — копия в LP-магазине; rare — только копии (сайты исследований, дропы, события)."""
+    row, out = d["bp"][b], []
+    if row[6] and (row[11] in (None, 0, 1) or row[1] == "r") and b not in d["inv"]:
+        out.append("market")
+    for src in d["inv"].get(b, []):
+        cat = (d["types"].get(str(src[0])) or [0, 0, 0, 0])[3]
+        k = "inv" if cat == 9 else "rev"
+        if k not in out:
+            out.append(k)
+    if b in d["lp"]:
+        out.append("lp")
+    return out or ["rare"]
+
+
+def bp_catalog(d: dict) -> dict:
+    T = d["types"]
+    items = []
+    for b, row in d["bp"].items():
+        prod = T.get(str(row[0])) or [str(row[0]), "", 0, 0]
+        items.append([int(b), prod[0], row[0], d["pmg"].get(b), row[1], bp_sources(d, b), prod[1]])
+    items.sort(key=lambda r: r[1].casefold())
+    return {"items": items, "groups": d["mg"]}
+
+
+def bp_detail(d: dict, b: str) -> Optional[dict]:
+    row = d["bp"].get(b)
+    if not row:
+        return None
+    T = d["types"]
+    name = lambda t: (T.get(str(t)) or [str(t)])[0]
+    prod, kind, out_qty, t, lim, price, mg, mats, t_copy, t_me, t_te, tl = row
+    path, g = [], mg
+    while g and str(g) in d["mg"]:
+        path.append(d["mg"][str(g)][1])
+        g = d["mg"][str(g)][0]
+    inv = [{"source": s[0], "source_name": name(s[0]), "relic": (T.get(str(s[0])) or [0, 0, 0, 0])[3] != 9, "chance": s[1], "runs": s[2],
+            "datacores": [{"type_id": m, "name": name(m), "qty": q} for m, q in s[3]], "time": s[4]} for s in d["inv"].get(b, [])]
+    inv.sort(key=lambda x: -x["chance"])
+    offers: Dict[str, dict] = {}                              # одинаковые предложения разных корпораций — одной строкой
+    for cid, lp, isk, qty, req in d["lp"].get(b, []):
+        k = json.dumps([lp, isk, qty, req])
+        o = offers.setdefault(k, {"lp": lp, "isk": isk, "qty": qty, "required": [{"type_id": m, "name": name(m), "qty": q} for m, q in req], "corps": []})
+        o["corps"].append(d["corps"].get(str(cid)) or str(cid))
+    return {"bp": int(b), "name": name(b), "product": prod, "product_name": name(prod), "product_ru": (T.get(str(prod)) or ["", ""])[1],
+            "kind": kind, "out": out_qty, "time": t, "max_runs": lim, "base_price": price, "market_path": list(reversed(path)) if row[6] else [],
+            "tech": tl, "materials": [{"type_id": m, "name": name(m), "qty": q} for m, q in mats],
+            "copy_time": t_copy, "me_time": t_me, "te_time": t_te, "sources": bp_sources(d, b), "invention": inv,
+            "lp": sorted(offers.values(), key=lambda o: (o["lp"], o["isk"]))}
+
+
 class Prices:
     """Средние цены игры (ESI /markets/prices/) — одним запросом, кэш на диске на 6 часов."""
 
@@ -232,4 +296,30 @@ def setup(ctx) -> None:
             threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="reference-icons", daemon=True).start()
         return {"ok": True, **res, "prices_at": prices.at or None, "online": ctx.online is not None, "built": data.get("built")}
 
+    bpd = load_bp()
+
+    def bp_cat(qs):
+        return {"ok": True, **bp_catalog(bpd), "built": bpd.get("built")}
+
+    def bp_one(qs):
+        r = bp_detail(bpd, (qs.get("id") or [""])[0])
+        if r is None:
+            return {"ok": False, "message": "Нет такого чертежа."}
+        if ctx.online is not None:
+            ids = [r["bp"], r["product"]] + [m["type_id"] for m in r["materials"]] + [x["source"] for x in r["invention"]] +                   [c["type_id"] for x in r["invention"] for c in x["datacores"]] + [q["type_id"] for o in r["lp"] for q in o["required"]]
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids[:150]], name="reference-icons", daemon=True).start()
+        return {"ok": True, **r}
+
+    def bp_icons(body, qs=None):
+        try:
+            ids = [int(x) for x in (body or {}).get("ids") or []][:200]
+        except (TypeError, ValueError, AttributeError):
+            return {"ok": False}
+        if ctx.online is not None:
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="reference-icons", daemon=True).start()
+        return {"ok": True}
+
     ctx.get("/api/reference/ores", ores)
+    ctx.get("/api/reference/blueprints", bp_cat)
+    ctx.get("/api/reference/blueprint", bp_one)
+    ctx.post("/api/reference/icons", bp_icons)
