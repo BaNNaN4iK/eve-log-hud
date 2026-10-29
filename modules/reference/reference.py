@@ -4,7 +4,7 @@
 во что перерабатывается, варианты и сжатая руда.
 
 Только стандартная библиотека. Данные — справочник игры (reference_data.json, собран из SDE скриптом
-build_reference_data.py), работают без интернета. «Где добывается» в SDE нет — это правила игры, записанные ниже (WHERE).
+build_reference_data.py), работают без интернета. «Где добывается» в SDE нет — места записаны ниже (PLACES) по EVE University Wiki.
 Стоимость — по средним ценам игры (ESI /markets/prices/), если включены онлайн-функции.
 """
 import json
@@ -26,37 +26,75 @@ CATS = {
 }
 MOON_RANK = {1884: "R4 · повсеместная", 1920: "R8 · обычная", 1921: "R16 · необычная", 1922: "R32 · редкая", 1923: "R64 · исключительная"}
 
-# где добывается: хай / лоу / нули / ВХ / Почвен + пояснение (по правилам игры; точный набор поясов зависит от региона)
+# где именно добывается: [зона, империи (None — любая), что именно] — по данным EVE University Wiki «Asteroids and ore»
+# (таблица поясов по империям, списки рудных аномалий, массивы разведки Equinox). После патчей игры может меняться.
 HS, LS, NS, WH, PV = "hs", "ls", "ns", "wh", "pv"
-BELT = "пояса астероидов и рудные аномалии"
-WHERE: Dict[int, Tuple[List[str], str]] = {
-    462: ([HS, LS, NS, WH], BELT + "; есть почти везде"),
-    460: ([HS, LS, NS, WH], BELT),
-    459: ([HS, LS, NS, WH], BELT),
-    458: ([HS, LS, NS, WH], BELT),
-    469: ([HS, LS, NS, WH], BELT + "; в хай-секе — в системах 0.7 и ниже"),
-    457: ([HS, LS, NS, WH], BELT + "; в хай-секе — в системах 0.7 и ниже"),
-    456: ([LS, NS, WH], BELT),
-    455: ([LS, NS, WH], BELT),
-    454: ([LS, NS, WH], BELT),
-    467: ([NS, WH], BELT),
-    453: ([NS, WH], BELT),
-    461: ([NS, WH], BELT),
-    452: ([NS, WH], BELT),
-    451: ([NS, WH], BELT),
-    450: ([NS, WH], BELT),
-    468: ([NS, WH], BELT + "; добывается только лазером Deep Core с кристаллами для Mercoxit"),
-    1884: ([HS, LS, NS, WH], "бурение лун (Athanor, Tatara)"),
-    1920: ([HS, LS, NS, WH], "бурение лун (Athanor, Tatara)"),
-    1921: ([LS, NS, WH], "бурение лун (Athanor, Tatara)"),
-    1922: ([LS, NS, WH], "бурение лун (Athanor, Tatara)"),
-    1923: ([LS, NS, WH], "бурение лун (Athanor, Tatara)"),
-    4029: ([PV], "Почвен — триглавское пространство"),
-    4030: ([PV], "Почвен — триглавское пространство"),
-    4031: ([PV], "Почвен — триглавское пространство"),
+AM, CA, GA, MI = "amarr", "caldari", "gallente", "minmatar"
+ALL4 = [AM, CA, GA, MI]
+MOON = "бурение лун: структура Athanor или Tatara с модулем бурения"
+PLACES = {
+    462: [(HS, ALL4, "пояса астероидов 1.0–0.5"),
+          (HS, None, "аномалия «Asteroid Belt Remnants» — стартовые системы и системы карьерных агентов"),
+          (NS, None, "аномалии «Veldspar» / «Large Veldspar» — суверенные нули с массивом разведки Tritanium")],
+    460: [(HS, ALL4, "пояса астероидов 1.0–0.5")],
+    459: [(HS, [AM, CA], "пояса астероидов 0.9–0.5"),
+          (LS, [AM, CA], "пояса астероидов 0.4–0.1"),
+          (NS, None, "пояса астероидов в части регионов (зависит от класса безопасности региона)"),
+          (WH, None, "рудные сайты червоточин")],
+    458: [(HS, [CA], "пояса астероидов 0.7 и ниже"),
+          (HS, [GA, MI], "пояса астероидов 0.9–0.5")],
+    469: [(HS, None, "редкие аномалии «Omber Deposit» и «Kernite and Omber Deposit» — системы 0.8–0.5 любой империи"),
+          (LS, [GA, MI], "пояса астероидов 0.4–0.1"),
+          (WH, None, "рудные сайты червоточин")],
+    457: [(HS, None, "редкая аномалия «Kernite and Omber Deposit» — системы 0.8–0.5 любой империи"),
+          (LS, [AM, CA, MI], "пояса астероидов 0.4–0.1"),
+          (NS, None, "пояса астероидов в части регионов (зависит от класса безопасности региона)"),
+          (WH, None, "рудные сайты червоточин")],
+    456: [(LS, [AM, GA], "пояса астероидов 0.4–0.1"),
+          (LS, None, "аномалии «Average Jaspet Deposit» и «Hedbergite, Hemorphite and Jaspet»")],
+    455: [(LS, [AM, GA], "пояса астероидов 0.2–0.1"),
+          (LS, None, "аномалия «Hedbergite, Hemorphite and Jaspet»")],
+    454: [(LS, [CA, MI], "пояса астероидов 0.2–0.1"),
+          (LS, None, "аномалия «Hedbergite, Hemorphite and Jaspet»")],
+    467: [(LS, None, "аномалии «Gneiss», «Dark Ochre and Gneiss», «Crokite, Dark Ochre and Gneiss»"),
+          (WH, None, "рудные сайты червоточин")],
+    453: [(LS, None, "аномалии «Dark Ochre and Gneiss», «Crokite and Dark Ochre», «Crokite, Dark Ochre and Gneiss»")],
+    452: [(LS, None, "аномалии «Crokite and Dark Ochre», «Crokite, Dark Ochre and Gneiss»")],
+    461: [(PV, None, "Почвен")],
+    451: [(NS, None, "пояса астероидов — в нулях с низкой безопасностью; в Дронлендах — везде"),
+          (NS, None, "аномалии «Bistot» и «Arkonor and Bistot»"),
+          (WH, None, "рудные сайты червоточин")],
+    450: [(NS, None, "пояса астероидов — в нулях с низкой безопасностью; в Дронлендах — везде"),
+          (NS, None, "аномалии «Arkonor and Bistot»"),
+          (WH, None, "рудные сайты червоточин")],
+    468: [(NS, None, "пояса астероидов в системах с самой низкой безопасностью; в Дронлендах — везде"),
+          (NS, None, "аномалии «Mercoxit Deposit» (small … enormous)"),
+          (PV, None, "Почвен — только домашние системы триглавов"),
+          (None, None, "добывается только лазером Deep Core (навык Deep Core Mining)")],
+    1884: [(HS, None, MOON), (LS, None, MOON), (NS, None, MOON), (WH, None, MOON)],
+    1920: [(HS, None, MOON), (LS, None, MOON), (NS, None, MOON), (WH, None, MOON)],
+    1921: [(LS, None, MOON), (NS, None, MOON), (WH, None, MOON)],
+    1922: [(LS, None, MOON), (NS, None, MOON), (WH, None, MOON)],
+    1923: [(LS, None, MOON), (NS, None, MOON), (WH, None, MOON)],
+    4029: [(PV, None, "Почвен — только там")],
+    4030: [(PV, None, "Почвен — только там")],
+    4031: [(PV, None, "Почвен — только там")],
+    4513: [(HS, None, "редкая «Small Mordunium Deposit» — системы 0.5 на границе с лоу-секом"),
+           (LS, None, "аномалия «Mordunium Deposit» — кроме систем фракционных войн"),
+           (NS, None, "аномалии от массива разведки Pyerite (суверенные нули)"),
+           (None, None, "редкие пограничные сайты: граница хай/лоу 0.5, граница нулей, синие A0 в нулях и ВХ")],
+    4514: [(None, None, "редкие пограничные сайты: граница хай/лоу 0.5, граница нулей, синие A0 в нулях и ВХ")],
+    4515: [(None, None, "редкие пограничные сайты: граница хай/лоу 0.5, граница нулей, синие A0 в нулях и ВХ")],
+    4516: [(None, None, "редкие пограничные сайты: граница хай/лоу 0.5, граница нулей, синие A0 в нулях и ВХ")],
+    4755: [(NS, None, "аномалии от массива разведки Mexallon (суверенные нули)")],
+    4756: [(NS, None, "аномалии от массива разведки Nocxium (суверенные нули)")],
+    4757: [(NS, None, "аномалии от массива разведки Megacyte (суверенные нули)")],
+    4758: [(NS, None, "аномалии от массива разведки Zydrine (суверенные нули)")],
+    4759: [(NS, None, "аномалии от массива разведки Isogen (суверенные нули)")],
 }
-for _g in CATS["equinox"][1]:
-    WHERE[_g] = ([NS], "нули: рудные аномалии от улучшений систем (Equinox)")
+# зоны пограничных руд (для фильтра «Где»): граница хай/лоу, нули, ВХ
+BORDER = {4513, 4514, 4515, 4516}
+
 SPECIAL_NOTE = "особые места: события, сайты, задания — в справочнике игры место не указано"
 
 GRADE = re.compile(r"\s+(0|II|III|IV)-Grade$")
@@ -117,13 +155,22 @@ def ore_table(data: dict, prices: Optional[Dict[int, float]] = None) -> dict:
             v["bonus"] = round((vt / total - 1) * 100) if total and vt else 0
         vs.sort(key=lambda v: (v["compressed"], v["bonus"], v["name"]))
         gid = f["group_id"]
-        where, note = WHERE.get(gid, ([], SPECIAL_NOTE))
+        pl = [{"sec": sec, "empires": emp, "text": text} for sec, emp, text in PLACES.get(gid, [])]
+        where = []
+        for x in pl:
+            if x["sec"] and x["sec"] not in where:
+                where.append(x["sec"])
+        if gid in BORDER:                                    # пограничные сайты: граница хай/лоу, нули, ВХ
+            where = [HS, LS, NS, WH]
+        empires = sorted({e for x in pl if x["sec"] in (HS, LS) for e in (x["empires"] or ALL4)})
+        note = pl[0]["text"] if pl else SPECIAL_NOTE
         cat = category(gid)
         if not any(v["mats"] for v in vs):                    # в группе обычной руды, но не перерабатывается — служебный предмет
-            cat, where, note = "special", [], "не перерабатывается и не встречается в поясах — служебный или старый предмет игры"
+            cat, where, pl, empires = "special", [], [], []
+            note = "не перерабатывается и не встречается в поясах — служебный или старый предмет игры"
         out.append({"name": f["name"], "type_id": base["type_id"], "ru": base["ru"], "group_id": gid,
                     "group": (data.get("groups", {}).get(str(gid)) or [""])[0], "cat": cat, "cat_name": CATS[cat][0] if cat in CATS else "Особая",
-                    "rank": MOON_RANK.get(gid, ""), "where": where, "note": note, "portion": base["portion"], "volume": base["volume"],
+                    "rank": MOON_RANK.get(gid, ""), "where": where, "note": note, "places": pl, "empires": empires, "portion": base["portion"], "volume": base["volume"],
                     "mats": base["mats"], "value": base["value"], "isk_m3": base["isk_m3"],
                     "variants": [v for v in vs if v is not base]})
     order = {"standard": 0, "moon": 1, "equinox": 2, "pochven": 3, "special": 4}
