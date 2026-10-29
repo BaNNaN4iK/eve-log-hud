@@ -293,6 +293,12 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
         <div class="small" id="logsMsg" role="status" aria-live="polite" style="margin-top:6px"></div>
         <div id="logsFound"></div>
       </section>
+      <section class="panel" id="eveBox"><h2>Персонажи EVE <span class="small muted">кошелёк, склад, добыча, киллмейлы</span></h2>
+        <p class="small muted" style="margin-top:0">Отдельное приложение EVE «данные персонажа» — не то, что у «Флота» (у флота свой вход, только состав флота).
+          Один вход даёт модулям доступы ниже; можно подключить нескольких персонажей. Токены хранятся только на этом компьютере.</p>
+        <div id="eveBody" class="small">Загружаю…</div>
+        <div class="small" id="eveMsg" role="status" aria-live="polite" style="margin-top:6px"></div>
+      </section>
       <section class="panel"><h2>Модули</h2>
         <p class="small muted" style="margin-top:0">Каждая возможность приложения — отдельный модуль. Выключенный модуль не запускается и не показывает свою вкладку.
           Установить модуль — положить его папку в папку модулей, удалить — убрать папку. Изменения вступают в силу после перезапуска.</p>
@@ -877,7 +883,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     if (S.tab === 'bounty') renderBounty(sel, T);
     if (S.tab === 'sessions') renderSessions(sel);
     if (S.tab === 'unparsed') renderUnparsed();
-    if (S.tab === 'modules') { renderModules(); loadLogsSettings(); }
+    if (S.tab === 'modules') { renderModules(); loadLogsSettings(); loadEve(); }
     if (MODTABS[S.tab] && MODTABS[S.tab].render) {
       try { MODTABS[S.tab].render(); } catch (e) { console.error('Модуль ' + S.tab + ':', e); }
     }
@@ -1525,6 +1531,48 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     if (!a) return;
     e.preventDefault();
     S.tab = a.getAttribute('data-goto'); savePrefs(); render();
+  });
+
+  // ---------- персонажи EVE: вход «данные персонажа» (eve_sso) ----------
+  var EVE = { at: 0, data: null };
+  function loadEve(force) {
+    if (AA_MODE || (!force && Date.now() - EVE.at < 15000)) return;
+    EVE.at = Date.now();
+    api('/api/eve/status').then(function (j) { if (j.ok) { EVE.data = j; renderEve(); } }, function () { });
+  }
+  function renderEve() {
+    var d = EVE.data, box = $('eveBody');
+    if (!d || !box) return;
+    var h = '';
+    if (!d.client_id_set) {
+      h += '<div class="notice warn" style="margin-bottom:8px">Нужен Client ID приложения EVE «данные персонажа». Один раз создайте его на ' +
+        '<b>developers.eveonline.com</b> → Create New Application:</div><ol style="margin:0 0 8px 18px;padding:0">' +
+        '<li>Название — любое, например «EVE Log HUD — данные персонажа».</li><li>Connection Type — <b>Authentication &amp; API Access</b>.</li>' +
+        '<li>Permissions — отметьте ровно эти: ' + d.scopes.map(function (s) { return '<code>' + esc(s[0]) + '</code> (' + esc(s[1]) + ')'; }).join(', ') + '.</li>' +
+        '<li>Callback URL — <code>' + esc(d.callback) + '</code></li><li>Скопируйте Client ID со страницы приложения и вставьте сюда.</li></ol>';
+    }
+    h += '<div class="controls"><label class="small muted" for="eveCid">Client ID</label><input id="eveCid" spellcheck="false" autocomplete="off" value="' + esc(d.client_id || '') + '" placeholder="32 знака" ' +
+      'style="flex:0 1 330px;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:13px ui-monospace,Consolas,monospace">' +
+      '<button type="button" class="btn" id="eveCidSave">Сохранить</button>' +
+      (d.client_id_set ? '<button type="button" class="btn primary" id="eveLogin">Подключить персонажа</button>' : '') + '</div>';
+    if (d.client_id_set) h += '<div class="muted" style="margin:4px 0">Доступы: ' + d.scopes.map(function (s) { return esc(s[1]); }).join(', ') + ' · адрес возврата <code>' + esc(d.callback) + '</code></div>';
+    h += d.chars.length ? '<div class="controls" style="margin-top:6px">' + d.chars.map(function (c) {
+      return '<span style="background:var(--panel2);border-radius:7px;padding:4px 8px">' + esc(c.name) +
+        (c.missing.length ? ' <span style="color:var(--warn)" title="Подключите заново, чтобы дать: ' + esc(c.missing.join(', ')) + '">⚠ нет: ' + esc(c.missing.join(', ')) + '</span>' : ' <span class="muted">все доступы</span>') +
+        ' <button type="button" class="btn" data-eve-out="' + c.id + '" title="Отключить" style="padding:0 6px">×</button></span>';
+    }).join('') + '</div>' : (d.client_id_set ? '<div class="muted" style="margin-top:6px">Персонажи не подключены.</div>' : '');
+    box.innerHTML = h;
+  }
+  function evePost(path, body, text) {
+    $('eveMsg').textContent = text || '';
+    return api(path, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+      .then(function (j) { $('eveMsg').innerHTML = '<span style="color:' + (j.ok ? 'var(--good)' : 'var(--bad)') + '">' + esc(j.message || '') + '</span>'; loadEve(true);
+        if (path === '/api/eve/login') setTimeout(function () { loadEve(true); }, 30000); }, function () { $('eveMsg').textContent = 'Нет связи с трекером.'; });
+  }
+  $('eveBody').addEventListener('click', function (e) {
+    if (e.target.id === 'eveCidSave') evePost('/api/eve/client', { client_id: $('eveCid').value }, 'Сохраняю…');
+    else if (e.target.id === 'eveLogin') evePost('/api/eve/login', {}, 'Открываю вход EVE…');
+    else if (e.target.getAttribute('data-eve-out') && confirm('Отключить персонажа? Его токен «данные персонажа» будет удалён с этого компьютера.')) evePost('/api/eve/logout', { id: +e.target.getAttribute('data-eve-out') });
   });
 
   // ---------- обновления с GitHub ----------

@@ -33,6 +33,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import eve_sso
 import modkit
 import updater
 from collections import namedtuple
@@ -1730,6 +1731,7 @@ class App:
         self.modules: List = []            # modkit.Module: найденные модули и их состояние
         self.stop_hooks: List = []         # модули: что сделать при остановке
         self.updater = None                # updater.Updater: версии с GitHub и установка модулей
+        self.eve = None                    # eve_sso.Auth: вход «данные персонажа» (кошелёк, склад, добыча, киллмейлы)
 
     def set_module(self, body) -> dict:
         """Вкладка «Модули»: включить или выключить (вступает в силу после перезапуска)."""
@@ -2362,6 +2364,7 @@ def run_app(cfg: dict, data_dir: str) -> int:
              "" if os.path.isdir(watcher.logs_dir) else " (НЕ НАЙДЕНА — укажите её на вкладке «Настройки» или в config.json, logs_dir)")
     online = Online(data_dir, cfg) if cfg["online_enabled"] else None
     app = App(cfg, data_dir, watcher, online)
+    eve_sso.install(app, atomic_write_json)                # до модулей: они берут персонажей и токены отсюда
     mods = modkit.activate(sys.modules[__name__], app, modkit.modules_dir(SCRIPT_DIR), stop)
     log.info("Модули: %s", ", ".join(f"{m.id}{'' if m.enabled else ' (выключен)'}{' ОШИБКА' if m.error else ''}" for m in mods) or "нет")
     if cfg.get("update_check", True):

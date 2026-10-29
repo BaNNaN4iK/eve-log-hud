@@ -28,7 +28,7 @@
     E.msg = text || '';
     return api(path, { method: 'POST', headers: POST, body: JSON.stringify(body || {}) }).then(function (j) {
       E.msg = j.message || ''; E.statusAt = 0; E.data = {}; ELW.render();
-      if (path === '/api/ess/sync' || path === '/api/ess/login') setTimeout(function () { E.statusAt = 0; E.data = {}; ELW.render(); }, path === '/api/ess/sync' ? 8000 : 30000);
+      if (path === '/api/ess/sync' || path === '/api/eve/login') setTimeout(function () { E.statusAt = 0; E.data = {}; ELW.render(); }, path === '/api/ess/sync' ? 8000 : 30000);
     }, function () { E.msg = 'Нет связи с трекером.'; ELW.render(); });
   }
 
@@ -48,8 +48,9 @@
     if (!st.chars.length) {
       return { html: head + '<p class="small" style="margin-top:0">В системах с ESS часть баунти уходит в банк ESS и приходит отдельной выплатой раз в ~3 часа. ' +
         'В логи игры она не попадает — поэтому «Баунти» выше без неё. Подключите персонажа, и приложение будет брать выплаты ESS и реальные выплаты баунти из журнала кошелька.</p>' +
-        '<div class="controls"><button type="button" class="btn primary" data-ess="login">Подключить персонажа (вход через EVE)</button>' +
-        '<span class="small muted">Доступ — только чтение кошелька. Вход отдельный от «Флота», токен хранится на этом компьютере.</span></div>' +
+        (st.client_id_set ? '<div class="controls"><button type="button" class="btn primary" data-ess="login">Подключить персонажа (вход через EVE)</button>' +
+          '<span class="small muted">Общий вход «данные персонажа» (кошелёк, склад, добыча, киллмейлы) — отдельное приложение EVE, не флотское. Персонажи — и в «Настройках».</span></div>' :
+          '<p class="small">Сначала впишите Client ID приложения EVE «данные персонажа»: <a href="#" data-goto="modules">«Настройки» → «Персонажи EVE»</a>.</p>') +
         (E.msg ? '<div class="small" role="status">' + esc(E.msg) + '</div>' : '') + '</section>' };
     }
     var d = load(sel), tiles = '';
@@ -82,8 +83,8 @@
     var b = e.target.closest && e.target.closest('[data-ess]');
     if (!b) return;
     var a = b.getAttribute('data-ess');
-    if (a === 'login') act('/api/ess/login', {}, 'Открываю вход EVE…');
+    if (a === 'login') act('/api/eve/login', {}, 'Открываю вход EVE…');
     else if (a === 'sync') act('/api/ess/sync', {}, 'Обновляю…');
-    else if (a === 'logout' && confirm('Отключить персонажа от выплат ESS? Сохранённые выплаты останутся.')) act('/api/ess/logout', { id: +b.getAttribute('data-id') });
+    else if (a === 'logout' && confirm('Отключить персонажа? Его токен «данные персонажа» будет удалён (кошелёк, склад, добыча). Сохранённые выплаты останутся.')) act('/api/eve/logout', { id: +b.getAttribute('data-id') });
   });
 })(window.ELW);

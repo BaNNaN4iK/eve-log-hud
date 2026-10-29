@@ -51,7 +51,7 @@ def main() -> int:
         shutil.rmtree(d, ignore_errors=True)
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--onedir", "--name", NAME,
            "--icon", "app.ico", "--add-data", f"dashboard.html{SEP}.", "--add-data", f"app.ico{SEP}.",
-           "--hidden-import", "eve_log_watcher", "--hidden-import", "modkit", "--hidden-import", "updater",
+           "--hidden-import", "eve_log_watcher", "--hidden-import", "modkit", "--hidden-import", "updater", "--hidden-import", "eve_sso",
            "--collect-submodules", "webview", "--collect-data", "webview"]
     for name in STDLIB_FOR_MODULES:
         cmd += ["--hidden-import", name]
