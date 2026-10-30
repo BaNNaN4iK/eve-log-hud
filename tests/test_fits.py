@@ -51,6 +51,19 @@ class TestFits(unittest.TestCase):
         self.assertEqual(fits.check(req, minimum, {3333: 5, 3394: 5, 21611: 5}, {}, SKILLS)["pct"], 100)
         self.assertEqual(fits.sp_for(1, 5), 256000)
 
+    def test_progression(self):
+        """Первым — самый дешёвый фит; дальше — тот, что проще докачать после уже поставленного."""
+        sk = {"1": ["A", 1.0], "2": ["B", 1.0], "3": ["C", 8.0]}
+        fs = [{"id": 1, "required": {"1": 3}}, {"id": 2, "required": {"1": 3, "2": 3}},
+              {"id": 3, "required": {"3": 5}}, {"id": 4, "required": {"1": 3, "2": 4}}]
+        tr = fits.progression(fs, sk)
+        self.assertEqual([n["id"] for n in tr], [1, 2, 4, 3])
+        by = {n["id"]: n for n in tr}
+        self.assertEqual((by[1]["parent"], by[2]["parent"], by[4]["parent"]), (None, 1, 2))
+        self.assertEqual(by[2]["extra"], fits.sp_for(1, 3))                 # навык A уже выучен — доучить только B
+        self.assertEqual(by[4]["depth"], 2)
+        self.assertEqual(fits.progression([], sk), [])
+
     def test_valid_dataset(self):
         self.assertIsNone(fits.valid_dataset(DATA))
         self.assertTrue(fits.valid_dataset({"x": 1}))
@@ -99,7 +112,8 @@ class TestFits(unittest.TestCase):
             self.assertEqual(j["fits"][0]["ship_name"], "Hurricane")
             self.assertFalse(j["ready"]["7"]["known"])                          # персонажа нет — навыки неизвестны
             self.assertFalse(app.routes[("POST", "/api/fits/refresh")][1]({})["ok"])
-            self.assertIn("/api/fits/import", elw.BIG_POST)                     # файл фитов больше обычного лимита
+            self.assertIn("/api/fits/import", elw.BIG_POST)
+            self.assertEqual(j["trees"]["1"][0]["id"], 7)                       # дерево прокачки по доктрине                     # файл фитов больше обычного лимита
         finally:
             td.cleanup()
 

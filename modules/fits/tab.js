@@ -21,9 +21,10 @@
   function groupName(g) { var i = GROUP_IX[g]; return i === undefined ? (g || 'Прочее') : GROUPS[i][1]; }
   var SLOTS = [['high', 'Верхние слоты'], ['mid', 'Средние слоты'], ['low', 'Нижние слоты'], ['rig', 'Риги'], ['subsystem', 'Подсистемы'],
     ['drone', 'Дроны'], ['charge', 'Заряды'], ['cargo', 'Груз']];
-  var F = { data: null, loading: false, char: '', doc: '', q: '', open: null, msg: '', key: null };
-  try { var sv = JSON.parse(localStorage.getItem('elw.fits') || '{}'); F.char = sv.char || ''; F.doc = sv.doc || ''; } catch (e) { }
-  function remember() { try { localStorage.setItem('elw.fits', JSON.stringify({ char: F.char, doc: F.doc })); } catch (e) { } }
+  var F = { data: null, loading: false, char: '', doc: '', q: '', open: null, msg: '', key: null, view: 'skills' };
+  try { var sv = JSON.parse(localStorage.getItem('elw.fits') || '{}'); F.char = sv.char || ''; F.doc = sv.doc || ''; F.view = sv.view === 'class' ? 'class' : 'skills'; } catch (e) { }
+  function remember() { try { localStorage.setItem('elw.fits', JSON.stringify({ char: F.char, doc: F.doc, view: F.view })); } catch (e) { } }
+  var CW = 224, CH = 122, GX = 52, GY = 14, PAD = 8;                 // дерево: плашка, отступы между столбцами и строками
   function ico(t, cls) { return t ? '<img class="' + (cls || 'ft-ico') + '" src="' + BASE + '/icons/' + t + '.png" alt="" loading="lazy">' : ''; }
   function tier(g) {
     g = String(g || '').toLowerCase();
@@ -71,6 +72,10 @@
       '.ft-mods{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:4px 16px;font-size:12.5px}.ft-mods div{display:flex;align-items:center;gap:6px}.ft-mods img{width:20px;height:20px;border-radius:3px}' +
       '.ft-chip{display:inline-block;font-size:11px;border-radius:6px;padding:1px 7px;border:1px solid var(--line);color:var(--muted);margin-right:4px}' +
       '.ft-tag{display:inline-block;font-size:10.5px;border-radius:4px;padding:0 5px;margin-left:4px;border:1px solid currentColor}.ft-tag.min{color:var(--bad)}.ft-tag.plan{color:var(--muted)}' +
+      '.ft-tw{overflow-x:auto;padding-bottom:4px}.ft-canvas{position:relative}.ft-canvas svg{position:absolute;left:0;top:0;pointer-events:none}' +
+      '.ft-node{position:absolute}.ft-node .ft-card{width:' + CW + 'px;height:' + CH + 'px}.ft-node.dim{opacity:.35}' +
+      '.ft-ln{fill:none;stroke:var(--line);stroke-width:2}.ft-ln.ok{stroke:var(--good)}.ft-ln.near{stroke:var(--warn)}' +
+      '.ft-inc{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
       '.ft-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}.ft-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}',
     html: '<div id="ftBox"></div>',
     render: function () { if (F.ready) draw(); } });
@@ -91,7 +96,7 @@
   function draw() {
     var d = F.data;
     if (!d) { if (!F.loading) load(); if (!$('ftBox').innerHTML) $('ftBox').innerHTML = '<section class="panel"><p class="muted">Загружаю фиты…</p></section>'; return; }
-    var key = JSON.stringify([F.char, F.doc, F.q, F.msg, d.built, d.char, d.busy, d.characters.map(function (c) { return c.synced + c.error; }), F.tick || 0]);
+    var key = JSON.stringify([F.view, F.char, F.doc, F.q, F.msg, d.built, d.char, d.busy, d.characters.map(function (c) { return c.synced + c.error; }), F.tick || 0]);
     if (key === F.key) return;
     F.key = key;
     var h = '<section class="panel"><h2>Фиты альянса <span class="muted small">дерево прокачки: доктрина за доктриной, от фрегатов к капиталам</span></h2>';
@@ -112,14 +117,19 @@
     if (F.msg) h += '<div class="small" role="status" style="margin-top:6px">' + esc(F.msg) + '</div>';
     if (d.has_data) {
       var docs = d.doctrines.filter(function (x) { return d.fits.some(function (f) { return f.doctrines.indexOf(x.id) >= 0; }); });
-      h += '<div class="ft-bar0" style="margin-top:8px"><span class="small muted">Доктрина</span><button type="button" class="in-chip' + (!F.doc ? ' on' : '') + '" data-ft-doc="">все</button>' +
+      h += '<div class="ft-bar0" style="margin-top:8px"><span class="small muted">Вид</span>' +
+        '<button type="button" class="in-chip' + (F.view === 'skills' ? ' on' : '') + '" data-ft-view="skills" title="Следом — фит, который проще всего докачать после предыдущего">дерево по навыкам</button>' +
+        '<button type="button" class="in-chip' + (F.view === 'class' ? ' on' : '') + '" data-ft-view="class">по классам кораблей</button></div>' +
+        '<div class="ft-bar0" style="margin-top:6px"><span class="small muted">Доктрина</span><button type="button" class="in-chip' + (!F.doc ? ' on' : '') + '" data-ft-doc="">все</button>' +
         docs.map(function (x) { return '<button type="button" class="in-chip' + (String(x.id) === F.doc ? ' on' : '') + '" data-ft-doc="' + x.id + '">' + esc(x.name) + '</button>'; }).join('') + '</div>' +
         '<div class="ft-legend"><span><i style="background:var(--good)"></i>готов</span><span><i style="background:var(--warn)"></i>от 80%</span><span><i style="background:var(--bad)"></i>меньше 80%</span>' +
         '<span><i style="background:var(--muted)"></i>навыки неизвестны</span><span>процент — в очках навыков (уровень V весит больше I); учтён минимум и план «летать хорошо»</span></div>' +
+        (F.view === 'skills' ? '<div class="small muted" style="margin-top:4px">Дерево по навыкам: первым — фит, который дешевле всего выучить с нуля; дальше по линиям — фиты, которые проще всего докачать после предыдущего ' +
+          '(часть навыков уже выучена). На плашке — сколько ещё SP доучить после предыдущего.</div>' : '') +
         '<div class="small muted" style="margin-top:4px">Фиты выгружены из AA' + (d.built ? ' ' + esc(d.built) : '') + '.</div>';
     }
     h += '</section>';
-    if (d.has_data) h += lanes(d);
+    if (d.has_data) h += F.view === 'skills' ? treeLanes(d) : lanes(d);
     $('ftBox').innerHTML = h;
     if (F.open) modal(F.open);
   }
@@ -154,9 +164,48 @@
     });
     return h || '<section class="panel"><p class="muted">Ничего не нашлось.</p></section>';
   }
-  function card(f, r) {
+  // ----- дерево по навыкам: каждый фит висит на том, после которого его проще всего докачать -----
+  function sp(v) { return v >= 1e6 ? String(Math.round(v / 1e5) / 10).replace('.', ',') + ' млн' : v >= 1e3 ? Math.round(v / 1e3) + ' тыс.' : String(v); }
+  function treeLanes(d) {
+    var q = F.q.trim().toLowerCase(), byId = {}, h = '';
+    d.fits.forEach(function (f) { byId[f.id] = f; });
+    var pass = function (f) { return !q || f.name.toLowerCase().indexOf(q) >= 0 || f.ship_name.toLowerCase().indexOf(q) >= 0; };
+    d.doctrines.concat([{ id: 'none', name: 'Без доктрины', description: '' }]).forEach(function (doc) {
+      if (F.doc && String(doc.id) !== F.doc) return;
+      var nodes = (d.trees[String(doc.id)] || []).filter(function (n) { return byId[n.id]; });
+      if (!nodes.length || (q && !nodes.some(function (n) { return pass(byId[n.id]); }))) return;
+      var kids = {}, row = 0, maxDepth = 0, pos = {};
+      nodes.forEach(function (n) { (kids[n.parent === null ? 'root' : n.parent] = kids[n.parent === null ? 'root' : n.parent] || []).push(n); maxDepth = Math.max(maxDepth, n.depth); });
+      function place(n) {                                     // листья — по строкам, родитель — посередине своих детей
+        var ch = kids[n.id] || [];
+        ch.forEach(place);
+        var y = ch.length ? (pos[ch[0].id].y + pos[ch[ch.length - 1].id].y) / 2 : row++;
+        pos[n.id] = { x: n.depth, y: y, n: n };
+      }
+      (kids.root || []).forEach(place);
+      var W = (maxDepth + 1) * (CW + GX) - GX + PAD * 2, H = row * (CH + GY) - GY + PAD * 2, lines = '';
+      nodes.forEach(function (n) {
+        if (n.parent === null || !pos[n.parent]) return;
+        var a = pos[n.parent], b = pos[n.id], x1 = PAD + a.x * (CW + GX) + CW, y1 = PAD + a.y * (CH + GY) + CH / 2, x2 = PAD + b.x * (CW + GX), y2 = PAD + b.y * (CH + GY) + CH / 2, mx = x1 + GX / 2;
+        var r = d.ready[n.id];
+        lines += '<path d="M' + x1 + ',' + y1 + ' H' + mx + ' V' + y2 + ' H' + x2 + '" class="ft-ln ' + state(r) + '"/>';
+      });
+      var ok = nodes.filter(function (n) { var r = d.ready[n.id]; return r && r.ok; }).length;
+      h += '<section class="ft-lane"><div class="ft-lh"><b>' + esc(doc.name) + '</b><span class="s">' + nodes.length + ' фит.' + (d.char ? ' · готов к ' + ok + ' из ' + nodes.length : '') + '</span>' +
+        (doc.description ? '<span class="s" style="flex:1;text-align:right">' + esc(doc.description.slice(0, 120)) + '</span>' : '') + '</div>' +
+        '<div class="ft-tw"><div class="ft-canvas" style="width:' + W + 'px;height:' + H + 'px"><svg width="' + W + '" height="' + H + '" aria-hidden="true">' + lines + '</svg>' +
+        nodes.map(function (n) {
+          var p = pos[n.id], f = byId[n.id], dim = q && !pass(f);
+          return '<div class="ft-node' + (dim ? ' dim' : '') + '" style="left:' + (PAD + p.x * (CW + GX)) + 'px;top:' + (PAD + p.y * (CH + GY)) + 'px">' + card(f, d.ready[n.id], n, byId[n.parent]) + '</div>';
+        }).join('') + '</div></div></section>';
+    });
+    return h || '<section class="panel"><p class="muted">Ничего не нашлось.</p></section>';
+  }
+  function card(f, r, n, parent) {
     return '<button type="button" class="ft-card ' + state(r) + '" data-ft-open="' + f.id + '" title="' + esc(f.ship_name + ' — ' + f.name) + '">' +
       '<div class="ft-top">' + ico(f.ship_type_id) + '<div style="min-width:0"><div class="ft-nm">' + esc(f.name) + '</div><div class="ft-sh">' + esc(f.ship_name) + '</div></div></div>' +
+      (n ? '<div class="ft-inc" title="' + esc(parent ? 'если навыки «' + parent.name + '» уже выучены' : 'всего навыков фита') + '">' +
+        (parent ? '+' + sp(n.extra) + ' SP после «' + esc(parent.ship_name) + '»' : 'с нуля: ' + sp(n.total) + ' SP') + '</div>' : '') +
       '<div class="ft-pb"><div style="width:' + (r && r.known ? r.pct : 0) + '%"></div></div>' +
       '<div class="ft-pl"><span>' + (r && r.known ? (r.ok ? '<b>готов</b>' : r.can_fly ? 'можно сесть' : 'не хватает минимума') : 'навыки неизвестны') + '</span><b>' + pct(r) + '</b></div></button>';
   }
@@ -178,6 +227,17 @@
     h += '<div class="tiles" style="margin-top:12px">' + ELW.tile('Изучено', pct(r), r && r.known ? (r.ok ? 'всё выучено' : r.can_fly ? 'минимум есть — можно сесть' : 'не хватает минимума') : (d.characters.length ? 'навыки персонажа не загружены — «Персонажи EVE»' : 'подключите персонажа'), r && r.ok ? 'bounty' : '') +
       ELW.tile('Осталось учить', r && r.known ? dur(r.minutes_left) : '—', r && r.known && r.sp_left ? L.fmtCompact(r.sp_left) + ' SP, ~30 SP/мин' : '') +
       ELW.tile('Не хватает навыков', r && r.known ? String(r.missing.length) : '—', r && r.known ? r.missing.filter(function (m) { return m.minimum; }).length + ' из минимума' : '') + '</div>';
+    var path = [];                                               // путь прокачки в первой доктрине фита
+    var tr = d.trees[String((f.doctrines[0] !== undefined ? f.doctrines[0] : 'none'))] || [], tn = {};
+    tr.forEach(function (n) { tn[n.id] = n; });
+    for (var cur = tn[f.id]; cur; cur = cur.parent !== null ? tn[cur.parent] : null) path.unshift(cur);
+    if (path.length > 1) {
+      var byId = {}; d.fits.forEach(function (x) { byId[x.id] = x; });
+      h += '<h3>Путь прокачки</h3><div style="font-size:13px">' + path.map(function (n, i) {
+        var x = byId[n.id];
+        return (i ? ' → ' : '') + '<b' + (n.id === f.id ? ' style="color:var(--accent)"' : '') + '>' + esc(x.name) + '</b> <span class="muted">(' + (i ? '+' + sp(n.extra) : sp(n.total)) + ' SP)</span>';
+      }).join('') + '</div>';
+    }
     if (f.description) h += '<h3>Описание</h3><div style="white-space:pre-wrap;font-size:13px">' + esc(f.description) + '</div>';
     if (r && r.known && r.missing.length) {
       h += '<h3>Чего не хватает <span class="muted" style="text-transform:none">— сначала минимум, короткие раньше</span></h3><div class="ft-sk">' + r.missing.map(function (m) {
@@ -225,6 +285,8 @@
     if (!box || !box.contains(t)) return;
     var o = t.closest('[data-ft-open]');
     if (o) { F.open = o.getAttribute('data-ft-open'); modal(F.open); return; }
+    var vw = t.closest('[data-ft-view]');
+    if (vw) { F.view = vw.getAttribute('data-ft-view'); remember(); F.key = null; draw(); return; }
     var dc = t.closest('[data-ft-doc]');
     if (dc) { F.doc = dc.getAttribute('data-ft-doc'); remember(); F.key = null; draw(); return; }
     if (t.id === 'ftSync') {

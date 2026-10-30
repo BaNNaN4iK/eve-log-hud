@@ -59,6 +59,53 @@ def check(required: Dict[int, int], minimum: set, have: Optional[Dict[int, int]]
             "minutes_left": int(sp_left / SP_PER_MINUTE)}
 
 
+def fit_skills(f: dict) -> Dict[int, int]:
+    """Минимум + план фита: {навык: уровень} (по каждому навыку — больший уровень)."""
+    req = {int(k): int(v) for k, v in (f.get("required") or {}).items()}
+    for k, v in (f.get("plan") or {}).items():
+        req[int(k)] = max(req.get(int(k), 0), int(v))
+    return req
+
+
+def total_sp(req: Dict[int, int], skills: dict) -> int:
+    return sum(sp_for((skills.get(str(s)) or ["", 1])[1], lv) for s, lv in req.items())
+
+
+def extra_sp(req: Dict[int, int], base: Dict[int, int], skills: dict) -> int:
+    """Сколько SP доучить для req, если навыки base уже выучены."""
+    out = 0
+    for s, lv in req.items():
+        rank = (skills.get(str(s)) or ["", 1])[1]
+        out += sp_for(rank, lv) - sp_for(rank, min(lv, base.get(s, 0)))
+    return out
+
+
+def progression(fits: list, skills: dict) -> list:
+    """Дерево прокачки фитов: первым — фит, который дешевле всего выучить с нуля; дальше на каждом шаге добавляется фит,
+    который проще всего докачать после одного из уже поставленных (больше всего общих навыков). Каждый фит висит на том,
+    после которого его докачать дешевле. → [{"id", "parent", "extra", "total", "depth"}] в порядке добавления."""
+    reqs = {f["id"]: fit_skills(f) for f in fits}
+    totals = {i: total_sp(r, skills) for i, r in reqs.items()}
+    left = set(reqs)
+    if not left:
+        return []
+    root = min(left, key=lambda i: (totals[i], str(i)))
+    out, depth = [{"id": root, "parent": None, "extra": totals[root], "total": totals[root], "depth": 0}], {root: 0}
+    left.discard(root)
+    best = {i: (extra_sp(reqs[i], reqs[root], skills), root) for i in left}   # дешевле всего от уже поставленных
+    while left:
+        i = min(left, key=lambda k: (best[k][0], totals[k], str(k)))
+        cost, parent = best.pop(i)
+        left.discard(i)
+        depth[i] = depth[parent] + 1
+        out.append({"id": i, "parent": parent, "extra": cost, "total": totals[i], "depth": depth[i]})
+        for k in left:
+            c = extra_sp(reqs[k], reqs[i], skills)
+            if c < best[k][0]:
+                best[k] = (c, i)
+    return out
+
+
 def load_fits(path: str) -> dict:
     try:
         with open(path, encoding="utf-8") as f:
@@ -154,18 +201,22 @@ def setup(ctx) -> None:
         skills = d.get("skills") or {}
         ready = {}
         for f in d.get("fits") or []:
-            req = {int(k): int(v) for k, v in (f.get("required") or {}).items()}
-            minimum = set(req)
-            for k, v in (f.get("plan") or {}).items():
-                req[int(k)] = max(req.get(int(k), 0), int(v))
-            ready[str(f["id"])] = check(req, minimum, have, queue, skills)
+            ready[str(f["id"])] = check(fit_skills(f), {int(k) for k in (f.get("required") or {})}, have, queue, skills)
+        if state.get("trees_for") is not d:                    # деревья прокачки по доктринам — не зависят от персонажа
+            groups = {}
+            for f in d.get("fits") or []:
+                for doc in f.get("doctrines") or ["none"]:
+                    groups.setdefault(str(doc), []).append(f)
+            state["trees"] = {k: progression(v, skills) for k, v in groups.items()}
+            state["trees_for"] = d
         if ctx.online is not None and not icons_done["v"] and d.get("fits"):
             icons_done["v"] = True
             ids = sorted({f["ship_type_id"] for f in d["fits"]} | {i["type_id"] for f in d["fits"] for i in f.get("items") or [] if i.get("type_id")})
             threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="fits-icons", daemon=True).start()
         return {"ok": True, "has_data": bool(d.get("fits")), "built": d.get("built"), "source": d.get("source", ""),
                 "doctrines": d.get("doctrines") or [], "fits": d.get("fits") or [], "skills": skills,
-                "characters": chars, "char": cid, "ready": ready, "busy": sk.busy, "client_id_set": bool(auth.client_id)}
+                "characters": chars, "char": cid, "ready": ready, "busy": sk.busy, "client_id_set": bool(auth.client_id),
+                "trees": state.get("trees") or {}}
 
     def refresh(body=None, qs=None):
         if not auth.chars:
