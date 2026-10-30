@@ -1718,6 +1718,9 @@ class Online:
 # Веб-сервер
 # ---------------------------------------------------------------------------
 
+BIG_POST = {"/api/fits/import": 8 * 1024 * 1024}          # адреса, куда страница присылает файлы целиком
+
+
 class App:
     """Связывает наблюдателя, онлайн-данные и веб-сервер."""
 
@@ -1990,7 +1993,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_ok():
             return self._text(403, "Запрещено: запрос не со страницы приложения")
         length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(min(length, 262144)) if length else b""
+        limit = BIG_POST.get(urllib.parse.urlsplit(self.path).path, 262144)    # загрузка файлов (фиты альянса) — больше
+        raw = self.rfile.read(min(length, limit)) if length else b""
         if urllib.parse.urlsplit(self.path).path == "/api/prices/refresh":
             code, obj = self.app.refresh_prices()
             return self._json(code, obj)

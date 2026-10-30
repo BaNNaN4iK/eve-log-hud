@@ -28,3 +28,7 @@ dist/
 *.spec
 __pycache__/
 *.pyc
+
+# фиты альянса — выгрузка из AA, только на компьютере пилота
+modules/fits/fits_data.json
+fits_data.json
