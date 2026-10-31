@@ -253,9 +253,14 @@ class Shell:
                              stderr=subprocess.DEVNULL)
 
     def watchdog(self, stop: threading.Event):
-        """Трекер должен работать всё время, пока приложение запущено."""
+        """Трекер должен работать всё время, пока приложение запущено; оверлей — запустить, когда модуль включили."""
+        was = self.overlay_available()
         while not stop.wait(15):
             self.ensure_tracker()
+            now = self.overlay_available()
+            if now and not was and self.prefs["overlay"]:
+                self.set_overlay(True)                       # включили на вкладке «Модули» — без перезапуска приложения
+            was = now
 
     def quit(self, icon=None, *_):
         for name in ("overlay", "window"):

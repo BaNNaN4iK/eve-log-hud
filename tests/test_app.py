@@ -41,6 +41,23 @@ class TestApp(unittest.TestCase):
             self.assertEqual(app.role_cmd("tracker"), [sys.executable, "--tracker"])
         self.assertFalse(app.server_up(1, timeout=0.2))                      # никого нет — не падаем
 
+    def test_overlay_starts_when_module_enabled(self):
+        """Модуль оверлея включили на вкладке «Модули» уже после запуска — оверлей запускается без перезапуска приложения."""
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"EVE_DATA_DIR": d}):
+            a = app.Shell()
+            avail = iter([False, False, True, True])
+            stop = mock.Mock()
+            stop.wait.side_effect = [False, False, False, True]
+            with mock.patch.object(a, "overlay_available", side_effect=lambda: next(avail)),                     mock.patch.object(a, "ensure_tracker"), mock.patch.object(a, "set_overlay") as so:
+                a.watchdog(stop)
+            so.assert_called_once_with(True)                                # только на переходе «выключен → включён»
+            a.prefs["overlay"] = False                                      # выключен вручную в трее — не трогаем
+            avail = iter([False, True])
+            stop.wait.side_effect = [False, True]
+            with mock.patch.object(a, "overlay_available", side_effect=lambda: next(avail)),                     mock.patch.object(a, "ensure_tracker"), mock.patch.object(a, "set_overlay") as so:
+                a.watchdog(stop)
+            so.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
