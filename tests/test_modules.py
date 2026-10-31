@@ -53,6 +53,12 @@ class TestModules(unittest.TestCase):
                 self.assertTrue(os.path.isfile(os.path.join(m.path, f)), (m.id, f))
             self.assertTrue(m.meta.get("name") and m.meta.get("description") and m.meta.get("version"), m.id)
 
+    def test_discover_skips_retired(self):
+        os.makedirs(os.path.join(self.root, "fits"))
+        with open(os.path.join(self.root, "fits", "module.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "fits", "name": "Фиты", "version": "1.0.0"}, f)
+        self.assertNotIn("fits", {m.id for m in modkit.discover(self.root)})
+
     def test_discover_rejects_bad_manifests(self):
         make_module(self.root, "good_one")
         make_module(self.root, "Bad-Name")                                    # недопустимое имя
