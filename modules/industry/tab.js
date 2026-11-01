@@ -243,6 +243,34 @@
     setView('proj');
     if (X.projects) X.projects.draft(name, over);
   };
+  // склад из игры (ESI, «Персонажи EVE»): места с вещами, выбор места, вещи на месте
+  var STOCK = { at: 0, d: null, wait: [] };
+  X.stockLocs = function (force) {
+    if (!force && STOCK.d && Date.now() - STOCK.at < 30000) return Promise.resolve(STOCK.d);
+    return api('/api/industry/stock/locations').then(function (j) { STOCK.d = j; STOCK.at = Date.now(); return j; });
+  };
+  X.stockItems = function (loc) {
+    return api('/api/industry/stock?loc=' + encodeURIComponent(loc)).then(function (j) {
+      var out = {}; Object.keys((j && j.items) || {}).forEach(function (k) { out[+k] = j.items[k]; }); return out;
+    });
+  };
+  X.stockRefresh = function () { return api('/api/industry/stock/refresh', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: '{}' }); };
+  // <select> складов; d — ответ stockLocs; пустой выбор — «не учитывать склад»
+  X.stockSelect = function (id, d, sel, none) {
+    var locs = (d && d.locations) || [];
+    var h = '<select id="' + id + '" aria-label="Склад из игры"><option value="">' + esc(none || 'склад не учитывать') + '</option>';
+    locs.forEach(function (l) { h += '<option value="' + l.id + '"' + (String(l.id) === String(sel) ? ' selected' : '') + '>' + esc(l.name) + ' — ' + L.fmtInt(l.types) + ' поз.</option>'; });
+    if (sel && !locs.some(function (l) { return String(l.id) === String(sel); })) h += '<option value="' + esc(sel) + '" selected>место ' + esc(sel) + ' (пусто)</option>';
+    return h + '</select>';
+  };
+  X.stockNote = function (d) {
+    if (!d || d.ok === false) return '<span class="in-sub">' + esc((d && d.message) || 'Склад недоступен') + '</span>';
+    if (!d.chars.length) return '<span class="in-sub">Подключите персонажа: «Настройки» → «Персонажи EVE» (доступ «склад»).</span>';
+    var bad = d.chars.filter(function (c) { return c.error; });
+    var at = Math.max.apply(null, d.chars.map(function (c) { return c.at || 0; }));
+    return '<span class="in-sub">' + (d.busy ? 'обновляю склад из игры…' : at ? 'склад обновлён ' + esc(L.fmtDateTime(at)) : 'склад ещё не загружен') +
+      (bad.length ? ' · ' + bad.map(function (c) { return esc(c.name + ': ' + c.error); }).join('; ') : '') + '</span>';
+  };
   // добавить продукт в «План производства» и открыть его (из справочника)
   X.toPlan = function (id, qty) {
     if (X.plan && X.plan.add) X.plan.add(id, qty);

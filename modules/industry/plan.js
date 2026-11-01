@@ -12,8 +12,9 @@
     if (Array.isArray(draft.items)) P.items = draft.items;
     if (draft.mode === 'buy') P.mode = 'buy';
     if (draft.name) P.name = draft.name;
+    if (draft.stock) P.stock = String(draft.stock);
   } catch (e) { }
-  function remember() { try { localStorage.setItem('elw.industry.plan', JSON.stringify({ items: P.items, mode: P.mode, name: P.name })); } catch (e) { } }
+  function remember() { try { localStorage.setItem('elw.industry.plan', JSON.stringify({ items: P.items, mode: P.mode, name: P.name, stock: P.stock })); } catch (e) { } }
   function isk(v) { return v === null || v === undefined ? '—' : L.fmtCompact(v); }
   function pct(v) { return v === null || v === undefined ? '—' : String(v).replace('.', ',') + '%'; }
   function cls(v) { return v > 0 ? 'in-good' : v < 0 ? 'in-bad' : ''; }
@@ -39,6 +40,7 @@
       '<button type="button" class="btn primary" id="plPin" title="Весь план — в «Ведение производства»: склад, что докупить, этапы, графики">📌 В ведение производства</button></div>' +
       '<div class="in-chips" style="margin-top:10px"><span class="small muted">Как строим' + ELW_INDUSTRY.help('pl_mode') + '</span>' +
       '<span id="plModes" class="in-chips"></span><span id="plMarket" class="small muted" style="margin-left:8px"></span>' +
+      '<div class="controls" id="plStockBar" style="margin-top:6px;flex-wrap:wrap;gap:8px"></div>' +
       '<button type="button" class="btn primary" id="plGo" style="margin-left:auto">Посчитать план</button></div>' +
       '<div class="small" id="plMsg" role="status" aria-live="polite" style="margin-top:6px"></div></section>' +
       '<section class="panel"><h2>Что строим <span class="muted small" id="plCount"></span></h2><div id="plItems"></div>' +
@@ -152,10 +154,24 @@
     }
   }
 
+  // склад из игры: что уже есть — в закупке «докупить» меньше
+  function drawStock() {
+    var bar = $('plStockBar');
+    if (!bar || !ELW_INDUSTRY.stockLocs) return;
+    ELW_INDUSTRY.stockLocs().then(function (d) {
+      bar.innerHTML = '<span class="small muted">Склад из игры</span>' + ELW_INDUSTRY.stockSelect('plStock', d, P.stock) +
+        '<button type="button" class="btn" id="plStockRefresh" style="padding:3px 10px">Обновить</button>' + ELW_INDUSTRY.stockNote(d);
+    }, function () { bar.innerHTML = ''; });
+  }
+  function loadStock() {
+    if (!P.stock) { P.have = null; drawResult(); return; }
+    ELW_INDUSTRY.stockItems(P.stock).then(function (m) { P.have = m; drawResult(); });
+  }
   function info(id) { var c = (P.catalog || []).filter(function (r) { return r[0] === id; })[0]; return c ? { name: c[1], cat: c[2], src: c[3], kind: c[4] } : { name: String(id) }; }
   function drawModes() {
     $('plModes').innerHTML = chip('mode', 'full', 'Полный цикл', P.mode === 'full') + chip('mode', 'buy', 'Покупаю компоненты', P.mode === 'buy');
     var se = (ELW_INDUSTRY.settings && ELW_INDUSTRY.settings()) || {};
+    drawStock();
     $('plMarket').innerHTML = 'цены: ' + esc({ jita: 'Jita 4-4', amarr: 'Amarr', dodixie: 'Dodixie', rens: 'Rens', hek: 'Hek' }[se.market] || 'Jita 4-4') +
       ' · сооружение, налоги, навыки — <button type="button" class="in-back" id="plDefaults" style="margin:0">настройки по умолчанию</button>';
   }
@@ -296,19 +312,28 @@
       (jr.length ? sec('jobs_r', 'Реакции <span class="n">(' + jr.length + ')</span>', jobTable(jr, 'plJobsR')) : ''), false);
 
     // закупка по группам
-    var groups = {}, order = [];
+    var groups = {}, order = [], H = P.have, buyLeft = 0;
+    r.shopping.forEach(function (x) {
+      x.have = H ? Math.min(H[x.type_id] || 0, x.qty) : 0;
+      x.left = x.qty - x.have;
+      x.left_total = x.price !== null && x.price !== undefined ? x.price * x.left : null;
+      buyLeft += x.left_total || 0;
+    });
     r.shopping.forEach(function (x) { if (!groups[x.group]) { groups[x.group] = []; order.push(x.group); } groups[x.group].push(x); });
     var shop = order.map(function (g) {
-      var sum = groups[g].reduce(function (a, x) { return a + (x.total || 0); }, 0);
+      var sum = groups[g].reduce(function (a, x) { return a + ((H ? x.left_total : x.total) || 0); }, 0);
       return sec('buy_' + g, esc(g) + ' <span class="n">(' + groups[g].length + ' · ' + isk(sum) + ' ISK)</span>', table('plBuy' + order.indexOf(g), groups[g], [
         { k: 'name', t: 'Предмет', l: 1, f: function (x) { return ico(x.type_id) + ELW_INDUSTRY.cp(x.name); } },
-        { k: 'qty', t: 'Количество', f: function (x) { return esc(L.fmtInt(x.qty)); } },
+        { k: 'qty', t: 'Количество', f: function (x) { return esc(L.fmtInt(x.qty)); } }].concat(H ? [
+        { k: 'have', t: 'На складе', f: function (x) { return x.have ? '<span class="in-good">' + esc(L.fmtInt(x.have)) + '</span>' : '—'; } },
+        { k: 'left', t: 'Докупить', f: function (x) { return x.left ? '<b>' + esc(L.fmtInt(x.left)) + '</b>' : '<span class="in-good">✓</span>'; } }] : []).concat([
         { k: 'price', t: 'Цена', f: function (x) { return esc(isk(x.price)); } },
-        { k: 'total', t: 'Сумма', f: function (x) { return esc(isk(x.total)); } },
+        { k: H ? 'left_total' : 'total', t: H ? 'Докупить на' : 'Сумма', f: function (x) { return esc(isk(H ? x.left_total : x.total)); } },
         { k: 'volume', t: 'м³', f: function (x) { return esc(L.fmtInt(x.volume)); } }
-      ], { sort: { k: 'total', d: -1 } }));
+      ]), { sort: { k: H ? 'left_total' : 'total', d: -1 } }));
     }).join('') + '<div class="controls" style="margin-top:8px"><button type="button" class="btn" id="plCopy">Скопировать список покупок</button><span class="small muted" id="plCopyMsg" role="status"></span></div>';
-    h += sec('buy', 'Закупка <span class="n">— ' + r.shopping.length + ' позиций · ' + isk((t.buy || 0) + (r.invention.reduce(function (a, x) { return a + (x.datacores_cost || 0); }, 0))) + ' ISK</span>', shop, true);
+    var dc = r.invention.reduce(function (a, x) { return a + (x.datacores_cost || 0); }, 0);
+    h += sec('buy', 'Закупка <span class="n">— ' + r.shopping.length + ' позиций · ' + (H ? 'докупить ' + isk(buyLeft + dc) + ' из ' + isk((t.buy || 0) + dc) + ' ISK (остальное на складе)' : isk((t.buy || 0) + dc) + ' ISK') + '</span>', shop, true);
 
     // изобретение
     if (r.invention.length) {
@@ -338,7 +363,7 @@
 
   document.addEventListener('click', function (e) {
     if (!e.target || e.target.id !== 'plCopy' || !P.res) return;
-    var text = P.res.shopping.map(function (x) { return x.name + ' ' + x.qty; }).join('\n'), msg = $('plCopyMsg');
+    var text = P.res.shopping.filter(function (x) { return !P.have || x.left > 0; }).map(function (x) { return x.name + ' ' + (P.have ? x.left : x.qty); }).join('\n'), msg = $('plCopyMsg');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = 'Скопировано — вставляется в «Купить несколько» на рынке игры.'; }, function () { msg.textContent = 'Не удалось.'; });
   });
 
@@ -355,6 +380,15 @@
   document.head.appendChild(st);
 
   window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'plStock') { P.stock = e.target.value || null; remember(); loadStock(); }
+  });
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.id === 'plStockRefresh') {
+      ELW_INDUSTRY.stockRefresh().then(function () { setTimeout(function () { ELW_INDUSTRY.stockLocs(true).then(function () { drawStock(); loadStock(); }); }, 8000); });
+      $('plStockBar').lastChild.textContent = 'обновляю склад из игры…';
+    }
+  });
   ELW_INDUSTRY.plan = {
     needs: function () {                                       // закупка посчитанного плана — для «Планетарки»; null — плана нет
       return P.res && P.res.shopping ? P.res.shopping.map(function (x) { return { id: x.type_id, qty: x.qty }; }) : null;
@@ -368,7 +402,7 @@
     render: function () {
       var first = !P.built;
       shell();
-      if (first) { drawModes(); drawItems(); drawFound(); if (P.items.length) calc(); }
+      if (first) { drawModes(); drawItems(); drawFound(); if (P.items.length) calc(); if (P.stock) loadStock(); }
     }
   };
 })(window.ELW);

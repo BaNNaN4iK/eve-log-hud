@@ -1431,6 +1431,18 @@ class Projects:
         return out
 
     # ----- изменения -----
+    def apply_stock(self, p: dict, items: Dict[int, int], now: Optional[float] = None) -> int:
+        """Склад из игры → «Есть» у материалов и сырья проекта (заменяет): сколько позиций проекта нашлось на складе."""
+        res = self._engine(p, time.time() if now is None else now)
+        if not res.get("ok"):
+            raise ValueError(res.get("message") or "Расчёт не удался")
+        types = {r["type_id"] for r in res["shopping"]}
+        rr = self.raw(p, now)
+        if rr is not None:
+            types |= {r["type_id"] for r in rr["shopping"]}
+        self.set_have(p, {str(t): items.get(t, 0) for t in types})
+        return sum(1 for t in types if items.get(t))
+
     def set_have(self, p: dict, have: dict, merge: bool = False) -> None:
         cur = dict(p.get("have") or {}) if merge else {}
         for k, v in (have or {}).items():
@@ -1800,6 +1812,168 @@ def pi_layout(d: dict, res: dict, cc: int = 5, head_h: float = 500, margin: floa
             "solo_h": round(solo), "spilled": spilled, "count": len(out), "characters": math.ceil(len(out) / PI_PER_CHAR) if out else 0}
 
 
+# ---------------------------------------------------------------------------
+# Склад из игры: вещи персонажей (ESI) по станциям и структурам — для «Плана» и «Ведения производства»
+# ---------------------------------------------------------------------------
+
+STOCK_SCOPE = "esi-assets.read_assets.v1"
+STRUCT_SCOPE = "esi-universe.read_structures.v1"
+STOCK_TTL = 3600                       # ESI кэширует вещи на час
+FITTED = re.compile(r"(HiSlot|MedSlot|LoSlot|RigSlot|SubSystemSlot|ServiceSlot|FighterTube)")
+
+
+def stock_roots(assets: List[dict]) -> List[Tuple[int, int, int]]:
+    """Вещи персонажа → [(место, предмет, кол-во)]: место — станция, структура или система, куда сворачиваются контейнеры,
+    корабли и ангары. Установленное на корабли (слоты) складом не считается."""
+    by_id = {a["item_id"]: a for a in assets if "item_id" in a}
+
+    def root(a, depth=0):
+        if a.get("location_type") != "item" or depth > 10:
+            return a.get("location_id")
+        parent = by_id.get(a.get("location_id"))
+        return root(parent, depth + 1) if parent else a.get("location_id")      # родитель не наш (офис корпорации) — его номер
+
+    out = []
+    for a in assets:
+        if FITTED.match(str(a.get("location_flag") or "")):
+            continue
+        loc = root(a)
+        if loc:
+            out.append((int(loc), int(a["type_id"]), int(a.get("quantity") or 1)))
+    return out
+
+
+class Stock:
+    """Вещи подключённых персонажей (вход «Персонажи EVE»), по местам; кэш на диске, обновление раз в час и по кнопке."""
+
+    def __init__(self, data_dir: str, auth, write: Callable, request: Optional[Callable] = None):
+        import eve_sso
+        self.sso = eve_sso
+        self.path = os.path.join(data_dir, "industry_stock.json") if data_dir else ""
+        self.auth, self.write, self.request = auth, write, request or eve_sso.http
+        self.busy, self.lock, self.hooks = False, threading.Lock(), []
+        self.data = {"chars": {}, "names": {}}
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                self.data.update(d)
+        except (OSError, ValueError):
+            pass
+
+    def _get_all(self, url: str, token: str) -> list:
+        out, page, pages = [], 1, 1
+        while page <= pages and page <= 50:
+            rows, hdrs = self.request("GET", f"{url}{'&' if '?' in url else '?'}page={page}", token=token)
+            out += rows or []
+            try:
+                pages = int((hdrs or {}).get("X-Pages") or (hdrs or {}).get("x-pages") or 1)
+            except (TypeError, ValueError):
+                pages = 1
+            page += 1
+        return out
+
+    def _names(self, locs: set, tokens: Dict[int, str]) -> None:
+        names = self.data["names"]
+        want = [x for x in locs if str(x) not in names]
+        npc = [x for x in want if x < 100_000_000]                       # станции NPC и системы — одним запросом
+        for i in range(0, len(npc), 900):
+            try:
+                rows, _ = self.request("POST", f"{self.sso.ESI}/universe/names/?datasource=tranquility", body=npc[i:i + 900])
+                for r in rows or []:
+                    names[str(r["id"])] = r["name"]
+            except self.sso.SsoError:
+                for x in npc[i:i + 900]:                                   # один «чужой» номер роняет весь список — по одному
+                    try:
+                        rows, _ = self.request("POST", f"{self.sso.ESI}/universe/names/?datasource=tranquility", body=[x])
+                        names[str(x)] = rows[0]["name"]
+                    except (self.sso.SsoError, IndexError, KeyError, TypeError):
+                        pass
+        for x in (x for x in want if x >= 1_000_000_000_000):          # структуры игроков — с токеном, нужен доступ к структуре
+            for cid, tok in tokens.items():
+                if not self.auth.has(cid, STRUCT_SCOPE):
+                    continue
+                try:
+                    r, _ = self.request("GET", f"{self.sso.ESI}/universe/structures/{x}/?datasource=tranquility", token=tok)
+                    names[str(x)] = r.get("name") or str(x)
+                    break
+                except self.sso.SsoError:
+                    continue
+
+    def sync(self, now: Optional[float] = None) -> None:
+        now = time.time() if now is None else now
+        with self.lock:
+            if self.busy:
+                return
+            self.busy = True
+        try:
+            tokens, locs = {}, set()
+            for cid, c in list(self.auth.chars.items()):
+                rec = self.data["chars"].setdefault(str(cid), {"name": c["name"], "at": 0, "error": "", "items": []})
+                rec["name"] = c["name"]
+                if not self.auth.has(cid, STOCK_SCOPE):
+                    rec["error"] = "нет доступа «склад» — отметьте его в «Персонажах EVE» и подключите персонажа заново"
+                    continue
+                try:
+                    tok = self.auth.token(cid)
+                    tokens[cid] = tok
+                    rows = self._get_all(f"{self.sso.ESI}/characters/{cid}/assets/?datasource=tranquility", tok)
+                    rec["items"] = [list(x) for x in stock_roots(rows)]
+                    rec["at"], rec["error"] = int(now), ""
+                except self.sso.SsoError as e:
+                    rec["error"] = str(e)
+                locs.update(x[0] for x in rec["items"])
+            for cid in [k for k in self.data["chars"] if int(k) not in self.auth.chars]:
+                del self.data["chars"][cid]                                # персонажа отключили — его вещей больше нет
+            self._names(locs, tokens)
+            if self.path:
+                self.write(self.path, self.data)
+        finally:
+            self.busy = False
+        for fn in list(self.hooks):
+            try:
+                fn()
+            except Exception:
+                pass
+
+    def stale(self, now: Optional[float] = None) -> bool:
+        now = time.time() if now is None else now
+        ok = [c for c in self.auth.chars if self.auth.has(c, STOCK_SCOPE)]
+        return bool(ok) and any(now - (self.data["chars"].get(str(c)) or {}).get("at", 0) >= STOCK_TTL for c in ok)
+
+    def locations(self) -> List[dict]:
+        acc = {}
+        for cid, rec in self.data["chars"].items():
+            for loc, tid, q in rec.get("items") or []:
+                a = acc.setdefault(loc, {"id": loc, "types": set(), "units": 0, "chars": set()})
+                a["types"].add(tid)
+                a["units"] += q
+                a["chars"].add(rec.get("name") or cid)
+        names = self.data["names"]
+        out = [{"id": a["id"], "name": names.get(str(a["id"])) or f"место {a['id']}", "types": len(a["types"]), "units": a["units"],
+                "chars": sorted(a["chars"])} for a in acc.values()]
+        return sorted(out, key=lambda x: -x["types"])
+
+    def items(self, loc: int) -> Dict[int, int]:
+        out: Dict[int, int] = {}
+        for rec in self.data["chars"].values():
+            for l, tid, q in rec.get("items") or []:
+                if l == loc:
+                    out[tid] = out.get(tid, 0) + q
+        return out
+
+    def name(self, loc: int) -> str:
+        return self.data["names"].get(str(loc)) or f"место {loc}"
+
+    def status(self) -> List[dict]:
+        out = []
+        for cid, c in self.auth.chars.items():
+            rec = self.data["chars"].get(str(cid)) or {}
+            out.append({"id": cid, "name": c["name"], "scope": self.auth.has(cid, STOCK_SCOPE), "at": rec.get("at") or 0,
+                        "error": rec.get("error") or ("" if self.auth.has(cid, STOCK_SCOPE) else "нет доступа «склад»")})
+        return out
+
+
 def setup(ctx) -> None:
     data = load_data()
     if not data.get("bp"):
@@ -2065,6 +2239,18 @@ def setup(ctx) -> None:
             elif action == "clear":
                 p["have"] = {}
                 projects.save()
+            elif action == "stock":                                # склад из игры: привязать (и сразу взять «Есть») или отвязать
+                loc = int(body.get("loc") or 0)
+                if not loc:
+                    p.pop("stock", None)
+                    projects.save()
+                    return {"ok": True, "message": "Склад отвязан — «Есть» больше не обновляется из игры."}
+                if stock is None:
+                    return {"ok": False, "message": "Склад из игры недоступен."}
+                p["stock"] = {"loc": loc, "name": stock.name(loc)}
+                n = projects.apply_stock(p, stock.items(loc))
+                projects.save()
+                return {"ok": True, "message": f"Склад «{stock.name(loc)}»: нашлось позиций проекта — {n}. «Есть» будет обновляться из игры."}
             elif action == "status":
                 projects.set_status(p, str(body.get("status") or ""), consume=body.get("consume") is not False)
             elif action == "job":
@@ -2161,6 +2347,65 @@ def setup(ctx) -> None:
         icons([r["type_id"] for r in res["steps"]] + [r["type_id"] for r in res["raw"]])
         return {"ok": True, **res}
 
+    stock = None
+    try:
+        import eve_sso
+        stock = Stock(ctx.data_dir, eve_sso.install(ctx.app, ctx.core.atomic_write_json), ctx.core.atomic_write_json)
+    except Exception as e:                                       # ядро без входа «Персонажи EVE» — без склада
+        ctx.log.info("Производство: склад из игры недоступен: %s", e)
+
+    def stock_projects():                                       # обновился склад — «Есть» у привязанных проектов
+        changed = False
+        for p in list(projects.items):
+            loc = (p.get("stock") or {}).get("loc")
+            if loc:
+                try:
+                    projects.apply_stock(p, stock.items(int(loc)))
+                    changed = True
+                except Exception as e:
+                    ctx.log.info("Производство: склад проекта %s не обновлён: %s", p.get("name"), e)
+        if changed:
+            projects.save()
+
+    def stock_locs(qs):
+        if stock is None:
+            return {"ok": False, "message": "Склад из игры недоступен — обновите приложение."}
+        if stock.stale() and not stock.busy:
+            threading.Thread(target=stock.sync, name="industry-stock", daemon=True).start()
+        return {"ok": True, "chars": stock.status(), "locations": stock.locations(), "busy": stock.busy}
+
+    def stock_items(qs):
+        if stock is None:
+            return {"ok": False, "message": "Склад из игры недоступен."}
+        try:
+            loc = int((qs.get("loc") or ["0"])[0])
+        except ValueError:
+            return {"ok": False, "message": "Неверное место."}
+        items = stock.items(loc)
+        return {"ok": True, "loc": loc, "name": stock.name(loc), "items": {str(k): v for k, v in items.items()}}
+
+    def stock_refresh(body=None, qs=None):
+        if stock is None or not stock.auth.chars:
+            return {"ok": False, "message": "Подключите персонажа: «Настройки» → «Персонажи EVE» (доступ «склад»)."}
+        threading.Thread(target=stock.sync, name="industry-stock", daemon=True).start()
+        return {"ok": True, "message": "Обновляю склад из игры…"}
+
+    if stock is not None:
+        stock.hooks.append(stock_projects)
+        stock.auth.on_linked(lambda *a: threading.Thread(target=stock.sync, name="industry-stock", daemon=True).start())
+
+        def stock_loop():
+            while not ctx.stop.wait(60):
+                if stock.stale() and not stock.busy:
+                    try:
+                        stock.sync()
+                    except Exception as e:
+                        ctx.log.warning("Производство: склад не обновлён: %s", e)
+        ctx.thread(stock_loop, "industry-stock")
+
+    ctx.get("/api/industry/stock/locations", stock_locs)
+    ctx.get("/api/industry/stock", stock_items)
+    ctx.post("/api/industry/stock/refresh", stock_refresh)
     ctx.get("/api/industry/catalog", catalog)
     ctx.get("/api/industry/pi/catalog", pi_cat)
     ctx.post("/api/industry/pi/calc", pi_calc)

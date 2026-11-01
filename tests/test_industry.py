@@ -653,3 +653,64 @@ class TestPlanetary(unittest.TestCase):
         self.assertEqual(len(d["planets"]), 15)                             # у каждого сырья P0 — типы планет
         r = ind.pi_plan(d, [(cat[-1][0], 1)])
         self.assertTrue(r["raw"] and all(x["planets"] for x in r["raw"]))
+
+
+class TestStock(unittest.TestCase):
+    """Склад из игры: вещи персонажей (ESI) по местам — контейнеры и корабли сворачиваются до станции/структуры."""
+
+    ASSETS = [
+        {"item_id": 1, "type_id": 34, "quantity": 1000, "location_id": 60003760, "location_type": "station", "location_flag": "Hangar"},
+        {"item_id": 2, "type_id": 17366, "quantity": 1, "location_id": 60003760, "location_type": "station", "location_flag": "Hangar"},  # контейнер
+        {"item_id": 3, "type_id": 35, "quantity": 500, "location_id": 2, "location_type": "item", "location_flag": "Unlocked"},
+        {"item_id": 4, "type_id": 587, "quantity": 1, "location_id": 1035466617946, "location_type": "other", "location_flag": "Hangar"},  # корабль в структуре
+        {"item_id": 5, "type_id": 3001, "quantity": 1, "location_id": 4, "location_type": "item", "location_flag": "HiSlot0"},  # установлено — не склад
+        {"item_id": 6, "type_id": 34, "quantity": 250, "location_id": 4, "location_type": "item", "location_flag": "Cargo"},
+    ]
+
+    def test_roots(self):
+        rows = ind.stock_roots(self.ASSETS)
+        self.assertIn((60003760, 35, 500), rows)                        # из контейнера — на станцию
+        self.assertIn((1035466617946, 34, 250), rows)                   # из трюма корабля — в структуру
+        self.assertNotIn(3001, [r[1] for r in rows])                    # модуль в слоте
+        self.assertEqual(len(rows), 5)
+
+    def test_sync_locations_items(self):
+        class Auth:
+            chars = {91: {"name": "Pilot A"}, 92: {"name": "Pilot B"}}
+            def has(self, cid, scope):
+                return cid == 91 or scope != ind.STOCK_SCOPE
+            def token(self, cid):
+                return "tok"
+        calls = []
+
+        def req(method, url, token="", body=None, **kw):
+            calls.append(url)
+            if "/assets/" in url:
+                return (self.ASSETS if "page=1" in url else []), {"X-Pages": "1"}
+            if "/universe/names/" in url:
+                return [{"id": 60003760, "name": "Jita IV - Moon 4"}], {}
+            if "/universe/structures/" in url:
+                return {"name": "1DQ1-A - Keepstar"}, {}
+            raise AssertionError(url)
+
+        td = TempDirs()
+        try:
+            st = ind.Stock(td.data, Auth(), lambda path, d: open(path, "w", encoding="utf-8").write(json.dumps(d)), req)
+            hooked = []
+            st.hooks.append(lambda: hooked.append(1))
+            self.assertTrue(st.stale())
+            st.sync(now=1000)
+            self.assertEqual(hooked, [1])
+            locs = {l["name"]: l for l in st.locations()}
+            self.assertEqual(set(locs), {"Jita IV - Moon 4", "1DQ1-A - Keepstar"})
+            self.assertEqual(locs["Jita IV - Moon 4"]["types"], 3)
+            self.assertEqual(st.items(60003760), {34: 1000, 17366: 1, 35: 500})
+            self.assertEqual(st.items(1035466617946), {587: 1, 34: 250})
+            status = {c["name"]: c for c in st.status()}
+            self.assertEqual(status["Pilot A"]["error"], "")
+            self.assertIn("склад", status["Pilot B"]["error"])         # без доступа «склад»
+            self.assertTrue(os.path.exists(os.path.join(td.data, "industry_stock.json")))
+            again = ind.Stock(td.data, Auth(), lambda *a: None, req)   # кэш на диске
+            self.assertEqual(again.items(60003760)[35], 500)
+        finally:
+            td.cleanup()

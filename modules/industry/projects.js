@@ -363,7 +363,11 @@
             '<td>' + esc(isk(m.price)) + '</td><td>' + (m.left ? esc(isk(m.left_cost)) : '—') + '</td></tr>';
         }).join('') + (shown.length ? '' : '<tr><td colspan="7" class="muted l">Ничего.</td></tr>') + '</tbody></table></div>';
     }
-    var tools = '<div class="controls" style="margin:4px 0 8px"><button type="button" class="btn" id="pjPasteBtn">Вставить склад из игры</button>' +
+    var sk = d.project.stock;
+    var tools = '<div class="controls" style="margin:4px 0 4px;flex-wrap:wrap;gap:8px"><span class="small muted">Склад из игры</span><span id="pjStockSel"><select disabled><option>' +
+      esc(sk ? sk.name : 'загружаю…') + '</option></select></span><button type="button" class="btn" id="pjStockRefresh" style="padding:3px 10px">Обновить</button>' +
+      '<span id="pjStockNote" class="in-sub">' + (sk ? '«Есть» берётся со склада «' + esc(sk.name) + '» и обновляется из игры сам (раз в час).' : 'Выберите станцию или структуру — «Есть» заполнится из игры и будет обновляться сам.') + '</span></div>' +
+      '<div class="controls" style="margin:4px 0 8px"><button type="button" class="btn" id="pjPasteBtn">Вставить склад из игры</button>' +
       '<button type="button" class="btn" id="pjClear" title="Обнулить «Есть» у всех материалов и сырья">Обнулить склад</button>' +
       '<span class="small muted">Склад общий для материалов и сырья: вставка из игры узнаёт и то и другое.</span></div>' +
       '<div id="pjPaste"' + (Q.paste ? '' : ' hidden') + ' class="pj-paste"><div class="small muted">В игре откройте ангар или контейнер, выделите предметы (Ctrl+A), скопируйте (Ctrl+C) и вставьте сюда. Подойдёт и список «Название количество» построчно; названия — на английском или русском.</div>' +
@@ -456,6 +460,7 @@
     h += fold('log', 'Журнал <span class="n">(' + (p.log || []).length + ')</span>', '<ul class="pj-log">' + (p.log || []).slice().reverse().map(function (x) {
       return '<li><span class="muted">' + esc(L.fmtDateTime(x[0])) + '</span> ' + esc(x[1]) + '</li>'; }).join('') + '</ul>', false);
     box.innerHTML = h + '</section>';
+    fillStock();
     if ($('pjSetBox')) ELW_INDUSTRY.fillForm('pjS', s);
     if (ELW_INDUSTRY.tree && $('pjTree')) ELW_INDUSTRY.tree.mount(d);
     Q.dirty = false;
@@ -475,6 +480,27 @@
   }
 
   // ---------- действия ----------
+  function fillStock() {                                     // выбор склада проекта — после отрисовки карточки
+    var box = $('pjStockSel');
+    if (!box || !Q.d || !ELW_INDUSTRY.stockLocs) return;
+    var sk = Q.d.project.stock;
+    ELW_INDUSTRY.stockLocs().then(function (d) {
+      if (!$('pjStockSel')) return;
+      $('pjStockSel').innerHTML = ELW_INDUSTRY.stockSelect('pjStock', d, sk && sk.loc, 'не привязан — «Есть» вручную');
+      var note = $('pjStockNote');
+      if (note) note.innerHTML = (sk ? '«Есть» берётся со склада «' + esc(sk.name) + '» и обновляется из игры сам (раз в час). ' : '') + ELW_INDUSTRY.stockNote(d);
+    });
+  }
+  document.addEventListener('change', function (e) {
+    if (!e.target || e.target.id !== 'pjStock' || !Q.d) return;
+    flash('Беру склад из игры…');
+    post({ action: 'stock', id: Q.d.project.id, loc: +e.target.value || 0 }).then(function (j) {
+      flash(j.message || (j.ok ? '' : 'Не получилось'));
+      var msg = $('pjMsg') && $('pjMsg').textContent;
+      loadDetail(false);
+      setTimeout(function () { if (msg) flash(msg); }, 400);
+    }, function () { flash('Нет связи с трекером.'); });
+  });
   function act(body, okText, reloadSeries) {
     flash('Сохраняю…');
     return post(body).then(function (j) {
@@ -531,6 +557,11 @@
     }
     if (!Q.d) return;
     var id = Q.d.project.id;
+    if (e.target.id === 'pjStockRefresh') {
+      flash('Обновляю склад из игры…');
+      ELW_INDUSTRY.stockRefresh().then(function (j) { flash(j.message || ''); setTimeout(function () { ELW_INDUSTRY.stockLocs(true).then(function () { loadDetail(false); }); }, 9000); });
+      return;
+    }
     if (e.target.id === 'pjPasteBtn') { Q.paste = !Q.paste; $('pjPaste').hidden = !Q.paste; if (Q.paste) $('pjPasteText').focus(); return; }
     if (e.target.id === 'pjPasteGo') {
       var mode = (document.querySelector('input[name=pjPm]:checked') || {}).value || 'set';
