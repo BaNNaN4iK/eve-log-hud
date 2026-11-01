@@ -98,6 +98,10 @@ class TestFactionWarfare(unittest.TestCase):
         self.assertIsNone(o[400]["isk_lp"])                             # нет цены — нет оценки
         self.assertEqual(s["cats"][0], [7, "Модули", 2])
         self.assertIsNone(ref.fw_store(d, "8"))
+        bp = {"bp": {"300": [587, "m", 1]}, "types": {"587": ["Rifter", "", 25, 6]}}
+        o = {x["type_id"]: x for x in ref.fw_store(d, "7", {}, bp)["offers"]}
+        self.assertEqual(o[300]["product"], {"type_id": 587, "name": "Rifter"})   # копия чертежа → что строить (в план производства)
+        self.assertIsNone(o[100]["product"])
 
     def test_live_stats(self):
         stats = [{"faction_id": 500001, "systems_controlled": 60, "pilots": 100, "kills": {"yesterday": 5, "last_week": 40},

@@ -54,6 +54,7 @@
       '.rf-fc{border:1px solid var(--line);border-left:5px solid var(--muted);border-radius:10px;background:var(--panel2);padding:10px 12px;display:flex;flex-direction:column;gap:6px}' +
       '.rf-fc.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}.rf-fc h3{margin:0;font-size:15px}.rf-fc .en{font-size:11.5px;color:var(--muted)}' +
       '.rf-fst{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 8px;font-size:12px}.rf-fst b{display:block;font-size:14px;font-variant-numeric:tabular-nums}.rf-fst span{color:var(--muted)}' +
+      '.rf-plan{color:var(--accent);text-decoration:none;font-weight:600}.rf-plan:hover{text-decoration:underline}' +
       '.rf-vs{font-size:12px}.rf-vs b{font-weight:600}.rf-pir{color:#e3a63e;border-color:#e3a63e}' +
       '@media(max-width:900px){.rf-layout{grid-template-columns:1fr}.rf-side{position:static;max-height:420px}}' +
       '@media(max-width:760px){.rf-t .hide-m{display:none}}',
@@ -263,7 +264,8 @@
     var h = '<section class="panel"><div class="rf-bph">' + ico(d.product, 'lg') + '<div><div class="rf-bpt">' + ELW_cp(d.product_name) + (d.tech ? ' <span class="rf-cat">T' + d.tech + '</span>' : '') +
       (d.kind === 'r' ? ' <span class="rf-cat">реакция</span>' : '') + '</div><div class="rf-sub">' + esc(d.name) + (d.product_ru ? ' · ' + esc(d.product_ru) : '') + '</div>' +
       '<div style="margin-top:4px">' + srcBadges(d.sources) + '</div></div>' +
-      (window.ELW_INDUSTRY && ELW_INDUSTRY.open ? '<button type="button" class="btn" data-bp-calc="' + esc(d.product_name) + '" style="margin-left:auto">Рассчитать в «Производстве»</button>' : '') + '</div></section>';
+      (window.ELW_INDUSTRY && ELW_INDUSTRY.open ? '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' + toPlan(d.product, d.product_name, true) +
+        '<a href="#" class="btn" data-goto="industry" data-bp-calc="' + esc(d.product_name) + '">Рассчитать в «Ведении производства»</a></span>' : '') + '</div></section>';
     // как получить
     h += '<section class="panel"><h2>Как получить</h2>';
     d.sources.forEach(function (s) {
@@ -305,6 +307,11 @@
       ELW.tile('Исследование TE', dur(d.te_time), 'уровень 1, базовое') + ELW.tile('Копирование', dur(d.copy_time), 'один прогон копии') + '</div>';
     return h + '</section>';
   }
+  // «В план производства»: вкладка «Производство» → «План производства», продукт чертежа добавлен и посчитан
+  function toPlan(pid, name, big) {
+    if (!window.ELW_INDUSTRY || !ELW_INDUSTRY.toPlan) return '';
+    return '<a href="#" class="' + (big ? 'btn primary' : 'rf-plan') + '" data-goto="industry" data-to-plan="' + pid + '" title="' + esc('Добавить «' + name + '» в план производства') + '">В план производства</a>';
+  }
   function ELW_cp(n) { return window.ELW_INDUSTRY && ELW_INDUSTRY.cp ? ELW_INDUSTRY.cp(n) : esc(n); }
   function bpSelect(id) {
     B.sel = id; bpRemember(); R.key = null; draw();
@@ -337,6 +344,10 @@
     } else if (b.hasAttribute('data-bp-sel')) { if (!e.target.closest('.in-cp')) bpSelect(b.getAttribute('data-bp-sel')); }
     else if (b.hasAttribute('data-bp-src')) { B.src = b.getAttribute('data-bp-src'); bpRemember(); R.key = null; draw(); }
     else if (b.hasAttribute('data-bp-calc')) ELW_INDUSTRY.open(b.getAttribute('data-bp-calc'));
+  });
+  document.addEventListener('click', function (e) {               // переход в план: вкладку переключает data-goto ядра
+    var a = e.target.closest && e.target.closest('[data-to-plan]');
+    if (a && window.ELW_INDUSTRY && ELW_INDUSTRY.toPlan) ELW_INDUSTRY.toPlan(+a.getAttribute('data-to-plan'));
   });
   document.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-bp-sel]')) { e.preventDefault(); bpSelect(e.target.getAttribute('data-bp-sel')); } });
   var tbq = null;
@@ -425,7 +436,7 @@
       '<th class="r hide-m">Ценность</th><th class="r">ISK за LP</th></tr></thead><tbody>' +
       rows.slice(0, 400).map(function (o) {
         return '<tr><td class="l">' + ico(o.type_id) + '<span class="rf-nm">' + ELW_cp(o.name) + '</span>' + (o.ru ? ' <span class="rf-sub">' + esc(o.ru) + '</span>' : '') +
-          '<div class="rf-sub" style="padding-left:28px">' + esc(o.group) + '</div></td><td class="r">' + L.fmtInt(o.qty) + '</td><td class="r">' + L.fmtInt(o.lp) + '</td>' +
+          '<div class="rf-sub" style="padding-left:28px">' + esc(o.group) + (o.product ? ' · ' + toPlan(o.product.type_id, o.product.name) : '') + '</div></td><td class="r">' + L.fmtInt(o.qty) + '</td><td class="r">' + L.fmtInt(o.lp) + '</td>' +
           '<td class="r">' + (o.isk ? L.fmtCompact(o.isk) : '—') + '</td><td class="l rf-mats">' + (o.required.length ? o.required.map(mat).join('') : '<span class="rf-sub">—</span>') + '</td>' +
           '<td class="r hide-m">' + (o.value ? L.fmtCompact(o.value) : '—') + '</td>' +
           '<td class="r">' + (o.isk_lp === null ? '<span class="rf-sub">—</span>' : '<b class="' + (o.isk_lp > 0 ? 'rf-plus' : 'rf-minus') + '">' + L.fmtInt(o.isk_lp) + '</b>') + '</td></tr>';

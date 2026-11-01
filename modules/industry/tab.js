@@ -240,6 +240,11 @@
     setView('proj');
     if (X.projects) X.projects.draft(name, over);
   };
+  // добавить продукт в «План производства» и открыть его (из справочника)
+  X.toPlan = function (id, qty) {
+    if (X.plan && X.plan.add) X.plan.add(id, qty);
+    setView('plan');
+  };
   // название предмета: нажатие копирует его (для поиска в игре)
   X.cp = function (name) {
     return '<span class="in-cp" data-copy-name="' + esc(name) + '" tabindex="0" role="button" title="Нажмите — скопировать название">' + esc(name) + '</span>';

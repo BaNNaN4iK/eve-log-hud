@@ -303,8 +303,9 @@ def fw_factions(d: dict, live: Optional[Dict[int, dict]] = None) -> List[dict]:
     return sorted(out, key=lambda f: order.index(f["id"]) if f["id"] in order else 99)
 
 
-def fw_store(d: dict, militia: str, prices: Optional[Dict[int, float]] = None) -> Optional[dict]:
-    """LP-магазин милиции: предложения с ценностью по средним ценам и ISK за LP (без копий чертежей)."""
+def fw_store(d: dict, militia: str, prices: Optional[Dict[int, float]] = None, bp: Optional[dict] = None) -> Optional[dict]:
+    """LP-магазин милиции: предложения с ценностью по средним ценам и ISK за LP (без копий чертежей).
+    bp — данные раздела «Чертежи»: у копии чертежа — что она производит (для перехода в план производства)."""
     rows = (d.get("offers") or {}).get(str(militia))
     if rows is None:
         return None
@@ -319,7 +320,9 @@ def fw_store(d: dict, militia: str, prices: Optional[Dict[int, float]] = None) -
             value = prices[tid] * qty
             if all(prices.get(r["type_id"]) for r in reqs):
                 net = value - isk - sum(prices[r["type_id"]] * r["qty"] for r in reqs)
-        out.append({"type_id": tid, "name": en, "ru": ru, "qty": qty, "lp": lp, "isk": isk, "ak": ak, "required": reqs,
+        row = ((bp or {}).get("bp") or {}).get(str(tid)) if cid == BLUEPRINT_CAT else None
+        product = {"type_id": row[0], "name": (((bp or {}).get("types") or {}).get(str(row[0])) or [str(row[0])])[0]} if row else None
+        out.append({"type_id": tid, "name": en, "ru": ru, "qty": qty, "lp": lp, "isk": isk, "ak": ak, "required": reqs, "product": product,
                     "group": (d.get("groups") or {}).get(str(gid), ""), "cat": cid, "value": value,
                     "isk_lp": round(net / lp, 1) if net is not None and lp else None})
     cats = {}
@@ -441,7 +444,7 @@ def setup(ctx) -> None:
                 "online": ctx.online is not None, "built": fwd.get("built")}
 
     def fw_shop(qs):
-        r = fw_store(fwd, (qs.get("id") or [""])[0], prices.get(want))
+        r = fw_store(fwd, (qs.get("id") or [""])[0], prices.get(want), bpd)
         if r is None:
             return {"ok": False, "message": "Нет такого магазина."}
         if ctx.online is not None:

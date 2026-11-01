@@ -356,6 +356,12 @@
 
   window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
   ELW_INDUSTRY.plan = {
+    add: function (id, qty) {                                  // снаружи (справочник): продукт в план и пересчитать
+      if (!id) return;
+      if (!P.items.some(function (i) { return i.id === id; })) P.items.push({ id: id, qty: qty || 1 });
+      remember();
+      if (P.built) { drawItems(); drawFound(); calc(); }
+    },
     render: function () {
       var first = !P.built;
       shell();
