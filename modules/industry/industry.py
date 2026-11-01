@@ -1701,7 +1701,8 @@ def pi_layout(d: dict, res: dict, extract_h: float = 6000, per_planet: int = 18,
             if not ok:
                 break
             here = lambda x: sum(1 for i in st["inputs"] if made_here(x).get(i["type_id"], 0) > 0)
-            pl = max(ok, key=lambda x: (here(x), x["free"]))
+            # где больше входов уже есть; при равенстве — где уже больше сборки (цепочка в одном месте, меньше перевозок)
+            pl = max(ok, key=lambda x: (here(x), len(x["make"]), x["free"]))
             n = min(left, pl["free"])
             pl["free"] -= n
             put(pl, st, n)
