@@ -70,7 +70,11 @@ class FakeESI(BaseHTTPRequestHandler):
                            "min_volume": 1},
                           {"is_buy_order": False, "location_id": 60003760, "price": 21.0, "volume_remain": 5}]
             return self._json(orders, {"X-Pages": "2"})
-        if p.startswith("/types/") and p.endswith("/icon"):
+        if p == "/types/999/icon":                           # чертёж: у него не icon, а bpc / bp
+            self.send_response(400)
+            self.end_headers()
+            return
+        if p.startswith("/types/") and p.endswith(("/icon", "/bpc")):
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.end_headers()
@@ -121,6 +125,11 @@ class TestOnline(unittest.TestCase):
         self.assertEqual(len(CALLS), n)
         # User-Agent с названием приложения и контактом
         self.assertTrue(all("EVELogWatcher/" in c[2] and "test@example.invalid" in c[2] for c in CALLS))
+
+    def test_blueprint_icon_fallback(self):
+        self.assertTrue(self.on.fetch_icon(999))
+        self.assertTrue(os.path.exists(self.on.icon_path(999)))
+        self.assertEqual([c[1] for c in CALLS if "/types/999/" in c[1]][-2:], ["/types/999/icon", "/types/999/bpc"])
 
     def test_aliases_used_for_lookup(self):
         self.on.resolve({"Вельдспар-рус"}, set(), {"Вельдспар-рус": "Veldspar"})

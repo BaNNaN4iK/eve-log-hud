@@ -1621,12 +1621,20 @@ class Online:
         p = self.icon_path(tid)
         if os.path.exists(p):
             return True
-        try:
-            data, _ = self.request(f"{self.img_base}/types/{int(tid)}/icon?size=64", binary=True)
-        except OnlineError as e:
-            log.info("Иконка %s не получена: %s", tid, e)
-            return False
+        data, err = b"", None
+        for kind in ("icon", "bpc", "bp"):                   # у чертежей картинка не icon, а bpc (копия) или bp (оригинал)
+            try:
+                data, _ = self.request(f"{self.img_base}/types/{int(tid)}/{kind}?size=64", binary=True)
+            except OnlineError as e:
+                err = e
+                if "HTTP 4" not in str(e):                   # нет связи и т. п. — другие варианты не помогут
+                    break
+                continue
+            if data.startswith(b"\x89PNG"):
+                break
         if not data.startswith(b"\x89PNG"):
+            if err:
+                log.info("Иконка %s не получена: %s", tid, err)
             return False
         os.makedirs(self.icons_dir, exist_ok=True)
         tmp = p + ".tmp"
