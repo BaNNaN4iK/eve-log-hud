@@ -7,12 +7,12 @@
   var POST = { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' };
   var LV = { 0: 'P0 сырьё', 1: 'P1', 2: 'P2', 3: 'P3', 4: 'P4' };
   var PL_COL = { barren: '#b39a7a', gas: '#d9c56b', ice: '#9fd4ee', lava: '#e0654a', oceanic: '#4a8fd9', plasma: '#c86ad9', storm: '#7f8fb0', temperate: '#5fb85f' };
-  var Q = { built: false, cat: null, planets: {}, piIds: {}, items: [], days: 7, lv: '', q: '', res: null, busy: false, msg: '', extract: 6000, per: 18 };
+  var Q = { built: false, cat: null, planets: {}, piIds: {}, items: [], days: 7, lv: '', q: '', res: null, busy: false, msg: '', extract: 6000, per: 18, mode: 'factory', slots: 6 };
   try {
     var sv = JSON.parse(localStorage.getItem('elw.industry.pi') || '{}');
-    Q.items = Array.isArray(sv.items) ? sv.items : []; Q.days = +sv.days || 7; Q.extract = +sv.extract || 6000; Q.per = +sv.per || 18;
+    Q.items = Array.isArray(sv.items) ? sv.items : []; Q.days = +sv.days || 7; Q.extract = +sv.extract || 6000; Q.per = +sv.per || 18; Q.mode = sv.mode === 'local' ? 'local' : 'factory'; Q.slots = sv.slots >= 0 ? +sv.slots : 6;
   } catch (e) { }
-  function remember() { try { localStorage.setItem('elw.industry.pi', JSON.stringify({ items: Q.items, days: Q.days, extract: Q.extract, per: Q.per })); } catch (e) { } }
+  function remember() { try { localStorage.setItem('elw.industry.pi', JSON.stringify({ items: Q.items, days: Q.days, extract: Q.extract, per: Q.per, mode: Q.mode, slots: Q.slots })); } catch (e) { } }
   function ico(t) { return ELW_INDUSTRY.ico ? ELW_INDUSTRY.ico(t) : ''; }
   function cp(n) { return ELW_INDUSTRY.cp ? ELW_INDUSTRY.cp(n) : esc(n); }
   function vol(v) { return L.fmtInt(Math.round(v)) + ' м³'; }
@@ -92,7 +92,7 @@
     clearTimeout(timer);
     if (!Q.items.length) { Q.res = null; drawRes(); return; }
     timer = setTimeout(function () {
-      api('/api/industry/pi/calc', { method: 'POST', headers: POST, body: JSON.stringify({ items: Q.items, days: Q.days, extract_h: Q.extract, per_planet: Q.per }) }).then(function (j) {
+      api('/api/industry/pi/calc', { method: 'POST', headers: POST, body: JSON.stringify({ items: Q.items, days: Q.days, extract_h: Q.extract, per_planet: Q.per, mode: Q.mode, local_slots: Q.slots }) }).then(function (j) {
         if (j.ok) { Q.res = j; drawRes(); setTimeout(drawRes, 3000); }                       // иконки догружаются
       });
     }, 150);
@@ -136,8 +136,15 @@
     if (!lay || !lay.planets.length) return '';
     var row = function (x, v, unit) { return '<div class="pi-row"><span>' + ico(x.type_id) + esc(x.name) + '</span><b>' + L.fmtInt(v) + ' ' + unit + '</b></div>'; };
     var n = 0, h = '<section class="panel"><h2>По планетам <span class="muted small">' + lay.count + ' планет · ' + lay.characters + ' перс. (до 6 планет на персонажа)</span></h2>' +
+      '<div class="controls" style="flex-wrap:wrap;gap:6px;margin-bottom:6px"><span class="small muted">Сборка P2–P4</span>' +
+      '<button type="button" class="in-chip' + (lay.mode === 'factory' ? ' on' : '') + '" data-pi-mode="factory" title="Добывающие только добывают и делают P1, всё остальное — на заводских планетах">на отдельных заводских планетах</button>' +
+      '<button type="button" class="in-chip' + (lay.mode === 'local' ? ' on' : '') + '" data-pi-mode="local" title="P2–P4 ставятся прямо на добывающие планеты, где больше всего входов уже есть">без сборочных планет (по возможности)</button></div>' +
       '<div class="controls" style="flex-wrap:wrap;gap:12px"><label class="small">Добыча с планеты <input type="number" class="pi-num" id="piExtract" min="100" step="500" value="' + esc(Q.extract) + '"> P0/ч</label>' +
-      '<label class="small">Фабрик на заводской планете <input type="number" class="pi-num" id="piPer" min="1" max="40" step="1" value="' + esc(Q.per) + '"></label></div>' +
+      '<label class="small">Фабрик на заводской планете <input type="number" class="pi-num" id="piPer" min="1" max="40" step="1" value="' + esc(Q.per) + '"></label>' +
+      (lay.mode === 'local' ? '<label class="small">Сборочных фабрик на добывающей <input type="number" class="pi-num" id="piSlots" min="0" max="20" step="1" value="' + esc(Q.slots) + '"></label>' : '') + '</div>' +
+      (lay.mode === 'local' && lay.spilled ? '<p class="small" style="margin:6px 0 0;color:var(--warn)">На добывающих не поместилось фабрик: ' + lay.spilled +
+        ' — для них добавлена заводская планета. Увеличьте «Сборочных фабрик на добывающей» или «Добыча с планеты» поменьше (тогда добывающих станет больше).</p>' : '') +
+      (lay.mode === 'local' && !lay.spilled ? '<p class="small" style="margin:6px 0 0;color:var(--good)">Всё собирается на добывающих планетах — отдельные заводы не нужны.</p>' : '') +
       '<p class="small muted" style="margin:6px 0 0">Добыча зависит от планеты, числа экстракторов и длины цикла — укажите, сколько сырья в час реально даёт ваша планета (6000/ч — это ровно одна базовая фабрика). ' +
       'Сколько фабрик помещается на заводскую — зависит от уровня командного центра и навыков (обычно 12–20 продвинутых при центре 5 уровня и космопорте).</p><div class="pi-planets">';
     lay.planets.forEach(function (p) {
@@ -148,7 +155,9 @@
         h += '<div class="pi-load" title="загрузка добычи: ' + p.load + '%"><div style="width:' + Math.min(100, p.load) + '%"></div></div>' +
           '<div class="k">Добывать (экстракторы)</div>' + p.extract.map(function (e) { return row(e, e.per_hour, 'в час'); }).join('') +
           '<div class="k">Базовые фабрики P0 → P1: ' + p.basic + '</div>' +
-          '<div class="k">Вывозить в сутки</div>' + p.export.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') +
+          (p.make.length ? '<div class="k">Сборка здесь же: ' + p.used + ' фабр.</div>' + p.make.map(function (m) { return '<div class="pi-row"><span>' + lvBadge(m.level) + ' ' + ico(m.type_id) + esc(m.name) + '</span><b>×' + m.factories + '</b></div>'; }).join('') : '') +
+          (p.import.length ? '<div class="k">Ввозить в сутки</div>' + p.import.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '') +
+          (p.export.length ? '<div class="k">Вывозить в сутки</div>' + p.export.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '') +
           (p.local_p2.length ? '<div class="small" style="color:var(--good)">Можно делать здесь же P2: ' + esc(p.local_p2.join(', ')) + ' — оба P1 добываются на этой планете.</div>' : '');
       } else {
         h += '<div class="pi-load" title="фабрик: ' + p.used + ' из ' + lay.per_planet + '"><div style="width:' + Math.min(100, p.used * 100 / lay.per_planet) + '%"></div></div>' +
@@ -177,17 +186,20 @@
   document.addEventListener('click', function (e) {
     var root = $('inPiView');
     if (!root || !root.contains(e.target)) return;
-    var t = e.target, b = t.closest('[data-pi-add],[data-pi-del],[data-pi-lv]');
+    var t = e.target, b = t.closest('[data-pi-add],[data-pi-del],[data-pi-lv],[data-pi-mode]');
     if (t.id === 'piFromPlan') { fromPlan(); return; }
     if (t.id === 'piClear') { Q.items = []; Q.msg = ''; remember(); drawItems(); drawList(); calc(); return; }
     if (!b) return;
     if (b.hasAttribute('data-pi-add')) { add(+b.getAttribute('data-pi-add')); Q.msg = ''; remember(); drawItems(); drawList(); calc(); }
     else if (b.hasAttribute('data-pi-del')) { var d = +b.getAttribute('data-pi-del'); Q.items = Q.items.filter(function (i) { return i.id !== d; }); remember(); drawItems(); drawList(); calc(); }
+    else if (b.hasAttribute('data-pi-mode')) { Q.mode = b.getAttribute('data-pi-mode'); remember(); calc(); }
     else { Q.lv = b.getAttribute('data-pi-lv'); drawList(); }
   });
   document.addEventListener('change', function (e) {
-    if (e.target && (e.target.id === 'piExtract' || e.target.id === 'piPer')) {
-      if (e.target.id === 'piExtract') Q.extract = Math.max(100, +e.target.value || 6000); else Q.per = Math.max(1, Math.min(40, Math.round(+e.target.value || 18)));
+    if (e.target && (e.target.id === 'piExtract' || e.target.id === 'piPer' || e.target.id === 'piSlots')) {
+      if (e.target.id === 'piExtract') Q.extract = Math.max(100, +e.target.value || 6000);
+      else if (e.target.id === 'piPer') Q.per = Math.max(1, Math.min(40, Math.round(+e.target.value || 18)));
+      else Q.slots = Math.max(0, Math.min(20, Math.round(+e.target.value || 0)));
       remember(); calc(); return;
     }
     var id = e.target && e.target.getAttribute && e.target.getAttribute('data-pi-qty');

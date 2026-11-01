@@ -628,6 +628,33 @@ class TestPlanetary(unittest.TestCase):
         self.assertEqual(sum(1 for p in lay2["planets"] if p["role"] == "extract"), 5)   # 6000 → 3 планеты, 4000 → 2
         self.assertEqual(sum(1 for p in lay2["planets"] if p["role"] == "factory"), 3)
 
+    def test_layout_without_assembly_planets(self):
+        r = ind.pi_plan(self.D, [(10, 2)], days=1)
+        lay = ind.pi_layout(self.D, r, extract_h=6000, per_planet=5, mode="local", local_slots=3)
+        self.assertEqual(lay["mode"], "local")
+        roles = [p["role"] for p in lay["planets"]]
+        # 5 сборочных фабрик, на двух добывающих по 3 места; P4 нельзя на Gas — его фабрика уходит на заводскую Barren/Temperate
+        self.assertEqual((roles.count("extract"), roles.count("factory")), (2, 1))
+        self.assertEqual(lay["spilled"], 1)
+        fa = next(p for p in lay["planets"] if p["role"] == "factory")
+        self.assertEqual([m["name"] for m in fa["make"]], ["Node"])
+        self.assertEqual(fa["kind"], "barren/temperate")
+        # Glass (из Water и Oxygen) встал туда, где оба P1 уже есть или где больше входов — и ввоз сходится с вывозом
+        exp, imp = {}, {}
+        for p in lay["planets"]:
+            for e in p["export"]:
+                exp[e["name"]] = exp.get(e["name"], 0) + e["per_day"]
+            for e in p["import"]:
+                imp[e["name"]] = imp.get(e["name"], 0) + e["per_day"]
+        for k, v in imp.items():
+            self.assertAlmostEqual(exp.get(k, 0) - (2 if k == "Node" else 0), v, delta=1, msg=k)
+        self.assertEqual(exp.get("Node"), 2)
+        full = ind.pi_layout(self.D, r, mode="local", local_slots=10, per_planet=5)
+        self.assertEqual(full["spilled"], 1)                               # P4 на Gas нельзя — всегда завод
+        d2 = dict(self.D, planets={"50": ["barren"], "51": ["barren"]})
+        r2 = ind.pi_plan(d2, [(10, 2)], days=1)
+        self.assertEqual(ind.pi_layout(d2, r2, mode="local", local_slots=10)["spilled"], 0)   # Barren — всё на месте
+
     def test_game_data(self):
         d = ind.load_pi()
         cat = ind.pi_catalog(d)
