@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Справочник EVE: разделы с таблицами по данным игры. Первый раздел — «Руда»: вся руда в игре, где добывается,
-во что перерабатывается, варианты и сжатая руда.
+Справочник EVE: разделы с таблицами по данным игры. «Руда»: вся руда в игре, где добывается, во что перерабатывается,
+варианты и сжатая руда. «Чертежи»: как получить каждый чертёж. «Фракционные войны»: фракции, милиции, их LP-магазины
+(reference_fw.json, build_reference_fw.py) и живая статистика войны из ESI.
 
 Только стандартная библиотека. Данные — справочник игры (reference_data.json, собран из SDE скриптом
 build_reference_data.py), работают без интернета. «Где добывается» в SDE нет — места записаны ниже (PLACES) по EVE University Wiki.
@@ -16,6 +17,17 @@ from typing import Dict, List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRICES_TTL = 6 * 3600
+FW_TTL = 30 * 60                       # ESI обновляет статистику войны раз в час, системы — каждые несколько минут
+BLUEPRINT_CAT = 9                      # копии чертежей: средней цены копии нет — ISK/LP не считаем
+# фракции фракционных войн: русское название, коротко о стороне
+FW_FACTIONS = {
+    500001: ("Государство Калдари", "империя; воюет с Галлентской Федерацией (зона боёв Black Rise / The Citadel / Placid) и с пиратами Guristas"),
+    500002: ("Республика Минматар", "империя; воюет с Амаррской Империей (зона боёв Heimatar, Metropolis, Devoid, Bleak Lands) и с Картелем Angel"),
+    500003: ("Амаррская Империя", "империя; воюет с Республикой Минматар (зона боёв Devoid, Bleak Lands, Heimatar, Metropolis) и с Картелем Angel"),
+    500004: ("Галлентская Федерация", "империя; воюет с Государством Калдари (зона боёв Black Rise / The Citadel / Placid) и с пиратами Guristas"),
+    500010: ("Пираты Guristas", "пиратская фракция (с 2024 г.): воюет с Калдари и Галленте; штаб в нулях Venal"),
+    500011: ("Картель Angel", "пиратская фракция (с 2024 г.): воюет с Амарр и Минматар; штаб в нулях Curse"),
+}
 
 # вид руды по группе игры
 CATS = {
@@ -243,6 +255,105 @@ def bp_detail(d: dict, b: str) -> Optional[dict]:
             "lp": sorted(offers.values(), key=lambda o: (o["lp"], o["isk"]))}
 
 
+# ---------------------------------------------------------------------------
+# Фракционные войны: фракции, милиции, LP-магазины, живая статистика
+# ---------------------------------------------------------------------------
+
+def load_fw(path: Optional[str] = None) -> dict:
+    try:
+        with open(path or os.path.join(HERE, "reference_fw.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"factions": [], "offers": {}, "types": {}, "groups": {}, "cats": {}}
+
+
+def fw_ids(d: dict) -> set:
+    """Все предметы LP-магазинов милиций и то, что для них нужно — для средних цен."""
+    return {int(t) for t in d.get("types") or {}}
+
+
+def fw_live(stats: list, systems: list) -> Dict[int, dict]:
+    """Статистика ESI по фракциям: системы, пилоты, убийства и очки победы; сколько своих систем оспаривается."""
+    out = {}
+    for s in stats or []:
+        k, vp = s.get("kills") or {}, s.get("victory_points") or {}
+        out[s["faction_id"]] = {"systems": s.get("systems_controlled", 0), "pilots": s.get("pilots", 0),
+                                "kills_day": k.get("yesterday", 0), "kills_week": k.get("last_week", 0),
+                                "vp_day": vp.get("yesterday", 0), "vp_week": vp.get("last_week", 0), "contested": 0, "vulnerable": 0}
+    for s in systems or []:
+        f = out.get(s.get("occupier_faction_id"))
+        if f is None:
+            continue
+        if s.get("contested") in ("contested", "vulnerable"):
+            f["contested"] += 1
+        if s.get("contested") == "vulnerable":
+            f["vulnerable"] += 1
+    return out
+
+
+def fw_factions(d: dict, live: Optional[Dict[int, dict]] = None) -> List[dict]:
+    names = {f["id"]: FW_FACTIONS.get(f["id"], (f["name"], ""))[0] for f in d.get("factions") or []}
+    out = []
+    for f in d.get("factions") or []:
+        ru, note = FW_FACTIONS.get(f["id"], (f["name"], ""))
+        out.append(dict(f, ru=ru, note=note, against_names=[names.get(a, str(a)) for a in f.get("against") or []],
+                        offers=len((d.get("offers") or {}).get(str(f["militia_id"])) or []),
+                        pirate=f["id"] in (500010, 500011), live=(live or {}).get(f["id"])))
+    order = [500003, 500002, 500011, 500001, 500004, 500010]          # по зонам боёв: Амарр/Минматар/Angel, Калдари/Галленте/Guristas
+    return sorted(out, key=lambda f: order.index(f["id"]) if f["id"] in order else 99)
+
+
+def fw_store(d: dict, militia: str, prices: Optional[Dict[int, float]] = None) -> Optional[dict]:
+    """LP-магазин милиции: предложения с ценностью по средним ценам и ISK за LP (без копий чертежей)."""
+    rows = (d.get("offers") or {}).get(str(militia))
+    if rows is None:
+        return None
+    T, prices = d.get("types") or {}, prices or {}
+    name = lambda t: (T.get(str(t)) or [str(t)])[0]
+    out = []
+    for tid, qty, lp, isk, ak, req in rows:
+        en, ru, gid, cid = (T.get(str(tid)) or [str(tid), "", 0, 0])[:4]
+        reqs = [{"type_id": t, "name": name(t), "qty": q} for t, q in req]
+        value = net = None
+        if cid != BLUEPRINT_CAT and prices.get(tid):
+            value = prices[tid] * qty
+            if all(prices.get(r["type_id"]) for r in reqs):
+                net = value - isk - sum(prices[r["type_id"]] * r["qty"] for r in reqs)
+        out.append({"type_id": tid, "name": en, "ru": ru, "qty": qty, "lp": lp, "isk": isk, "ak": ak, "required": reqs,
+                    "group": (d.get("groups") or {}).get(str(gid), ""), "cat": cid, "value": value,
+                    "isk_lp": round(net / lp, 1) if net is not None and lp else None})
+    cats = {}
+    for o in out:
+        cats[o["cat"]] = cats.get(o["cat"], 0) + 1
+    return {"offers": out, "cats": [[c, (d.get("cats") or {}).get(str(c), str(c)), n] for c, n in sorted(cats.items(), key=lambda x: -x[1])]}
+
+
+class FwLive:
+    """Живая статистика войны (ESI /fw/stats/ и /fw/systems/), в фоне, не чаще раза в FW_TTL."""
+
+    def __init__(self, esi):
+        self.esi = esi
+        self.at, self.data, self.busy, self.error = 0, {}, False, ""
+
+    def get(self, now: Optional[float] = None) -> Dict[int, dict]:
+        now = time.time() if now is None else now
+        if self.esi is not None and now - self.at >= FW_TTL and not self.busy:
+            self.busy = True
+            threading.Thread(target=self.refresh, name="reference-fw", daemon=True).start()
+        return self.data
+
+    def refresh(self) -> None:
+        try:
+            stats, _ = self.esi("/fw/stats/")
+            systems, _ = self.esi("/fw/systems/")
+            self.data, self.at, self.error = fw_live(stats, systems), int(time.time()), ""
+        except Exception as e:
+            self.error = str(e)
+            self.at = int(time.time()) - FW_TTL + 300           # не получилось — повторим через 5 минут
+        finally:
+            self.busy = False
+
+
 class Prices:
     """Средние цены игры (ESI /markets/prices/) — одним запросом, кэш на диске на 6 часов."""
 
@@ -257,10 +368,14 @@ class Prices:
         except (OSError, ValueError, AttributeError):
             pass
         self.busy = False
+        self.full = False
 
     def get(self, want: set, now: Optional[float] = None) -> Dict[int, float]:
         now = time.time() if now is None else now
-        if self.esi is not None and now - self.at >= PRICES_TTL and not self.busy:
+        missing = bool(self.prices) and not self.full and any(t not in self.prices for t in want)
+        if missing:
+            self.full = True                                    # кэш собран на меньший набор предметов — перекачать один раз
+        if self.esi is not None and (now - self.at >= PRICES_TTL or missing) and not self.busy:
             threading.Thread(target=self.refresh, args=(want,), name="reference-prices", daemon=True).start()
         return {t: p for t, p in self.prices.items() if t in want}
 
@@ -284,7 +399,9 @@ class Prices:
 
 def setup(ctx) -> None:
     data = load_data()
-    want = {int(k) for k in data.get("materials", {})}
+    fwd = load_fw()
+    want = {int(k) for k in data.get("materials", {})} | fw_ids(fwd)
+    live = FwLive(ctx.online.esi if ctx.online is not None else None)
     prices = Prices(ctx.online.esi if ctx.online is not None else None, os.path.join(ctx.data_dir, "reference_prices.json"))
     icons_done = {"v": False}
 
@@ -319,7 +436,22 @@ def setup(ctx) -> None:
             threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="reference-icons", daemon=True).start()
         return {"ok": True}
 
+    def fw(qs):
+        return {"ok": True, "factions": fw_factions(fwd, live.get()), "live_at": live.at or None, "live_error": live.error,
+                "online": ctx.online is not None, "built": fwd.get("built")}
+
+    def fw_shop(qs):
+        r = fw_store(fwd, (qs.get("id") or [""])[0], prices.get(want))
+        if r is None:
+            return {"ok": False, "message": "Нет такого магазина."}
+        if ctx.online is not None:
+            ids = list(dict.fromkeys([o["type_id"] for o in r["offers"]] + [q["type_id"] for o in r["offers"] for q in o["required"]]))
+            threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="reference-icons", daemon=True).start()
+        return {"ok": True, **r, "prices_at": prices.at or None}
+
     ctx.get("/api/reference/ores", ores)
+    ctx.get("/api/reference/fw", fw)
+    ctx.get("/api/reference/fw/store", fw_shop)
     ctx.get("/api/reference/blueprints", bp_cat)
     ctx.get("/api/reference/blueprint", bp_one)
     ctx.post("/api/reference/icons", bp_icons)

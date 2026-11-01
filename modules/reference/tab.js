@@ -1,9 +1,10 @@
-// Вкладка модуля «Справочник»: разделы-подвкладки. Первый — «Руда»: вся руда игры, где добывается, во что перерабатывается.
+// Вкладка модуля «Справочник»: разделы-подвкладки — «Руда» (где добывается, во что перерабатывается), «Чертежи» (как получить),
+// «Фракционные войны» (фракции, милиции, живая статистика, LP-магазины милиций).
 (function (ELW) {
   'use strict';
   if (!ELW || !ELW.addTab) return;
   var api = ELW.api, esc = ELW.esc, L = ELW.L, $ = ELW.$, BASE = ELW.base;
-  var SECTIONS = [['ore', 'Руда'], ['bp', 'Чертежи']];
+  var SECTIONS = [['ore', 'Руда'], ['bp', 'Чертежи'], ['fw', 'Фракционные войны']];
   var WHERE = { hs: ['хай', 'хай-сек (1.0–0.5)'], ls: ['лоу', 'лоу-сек (0.4–0.1)'], ns: ['нули', 'нули (0.0 и ниже)'], wh: ['ВХ', 'червоточины (ВХ)'], pv: ['Почвен', 'Почвен'] };
   var EMP = { amarr: 'Амарр', caldari: 'Калдари', gallente: 'Галленте', minmatar: 'Минматар' };
   var R = { section: 'ore', data: null, loading: false, cat: '', where: '', empire: '', mineral: '', q: '', sort: '', open: {}, key: null };
@@ -49,6 +50,11 @@
       '.rf-how{border-left:4px solid var(--line);padding:4px 0 6px 12px;margin:10px 0}.rf-how h3{margin:0 0 4px;font-size:14px}.rf-how p{margin:4px 0;font-size:13px}' +
       '.rf-how.market{border-left-color:#4fbf74}.rf-how.inv{border-left-color:var(--accent)}.rf-how.rev{border-left-color:#a58cf0}.rf-how.lp{border-left-color:#e3a63e}.rf-how.rare{border-left-color:#8a94a3}' +
       '.rf-mini{width:auto;min-width:320px;margin-top:4px}.rf-mini td,.rf-mini th{padding:3px 10px 3px 0}.rf-mini td.l{white-space:normal;min-width:140px}.rf-mini .rf-m{margin-right:8px}' +
+      '.rf-fws{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px;margin-top:10px}' +
+      '.rf-fc{border:1px solid var(--line);border-left:5px solid var(--muted);border-radius:10px;background:var(--panel2);padding:10px 12px;display:flex;flex-direction:column;gap:6px}' +
+      '.rf-fc.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}.rf-fc h3{margin:0;font-size:15px}.rf-fc .en{font-size:11.5px;color:var(--muted)}' +
+      '.rf-fst{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 8px;font-size:12px}.rf-fst b{display:block;font-size:14px;font-variant-numeric:tabular-nums}.rf-fst span{color:var(--muted)}' +
+      '.rf-vs{font-size:12px}.rf-vs b{font-weight:600}.rf-pir{color:#e3a63e;border-color:#e3a63e}' +
       '@media(max-width:900px){.rf-layout{grid-template-columns:1fr}.rf-side{position:static;max-height:420px}}' +
       '@media(max-width:760px){.rf-t .hide-m{display:none}}',
     html: '<div class="rf-views" role="tablist" aria-label="Разделы справочника" id="rfSections"></div><div id="rfBody"></div>',
@@ -71,6 +77,13 @@
 
   function draw() {
     sections();
+    if (R.section === 'fw') {
+      var fkey = JSON.stringify(['fw', W.sel, W.cat, W.q, W.sort, W.priced, !!W.data, W.data && W.data.live_at, W.store && W.store.id, W.store && W.store.prices_at, W.tick]);
+      if (fkey === R.key) return;
+      R.key = fkey;
+      drawFw();
+      return;
+    }
     if (R.section === 'bp') {
       var bkey = JSON.stringify(['bp', B.q, B.src, B.open, B.sel, B.det && B.det.bp, !!B.cat]);
       if (bkey === R.key) return;
@@ -328,6 +341,112 @@
   document.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-bp-sel]')) { e.preventDefault(); bpSelect(e.target.getAttribute('data-bp-sel')); } });
   var tbq = null;
   document.addEventListener('input', function (e) { if (e.target && e.target.id === 'rfBpQ') { var v = e.target.value; clearTimeout(tbq); tbq = setTimeout(function () { B.q = v; R.key = null; draw(); }, 200); } });
+  // ----- раздел «Фракционные войны»: фракции, живая статистика, LP-магазины милиций -----
+  var FCOL = { 500003: '#d9a84a', 500002: '#c8643f', 500011: '#c04848', 500001: '#4a9ad9', 500004: '#4fb07a', 500010: '#b5b04a' };
+  var W = { data: null, loading: false, sel: '', store: null, storeLoading: false, cat: '', q: '', sort: 'isk_lp', priced: false, tick: 0 };
+  try {
+    var ws = JSON.parse(localStorage.getItem('elw.reference.fw') || '{}');
+    W.sel = ws.sel || ''; W.cat = ws.cat || ''; W.sort = ws.sort || 'isk_lp'; W.priced = !!ws.priced;
+  } catch (e) { }
+  function fwRemember() { try { localStorage.setItem('elw.reference.fw', JSON.stringify({ sel: W.sel, cat: W.cat, sort: W.sort, priced: W.priced })); } catch (e) { } }
+  function fwLoad() {
+    if (W.loading) return;
+    W.loading = true;
+    api('/api/reference/fw').then(function (j) {
+      W.loading = false;
+      if (!j.ok) return;
+      W.data = j; R.key = null; draw();
+      if (!j.live_at && j.online) setTimeout(function () { W.data = null; R.key = null; draw(); }, 6000);   // статистика догружается
+    }, function () { W.loading = false; $('rfBody').innerHTML = '<section class="panel"><p class="in-bad">Нет связи с трекером.</p></section>'; });
+  }
+  function fwStore(id) {
+    if (W.storeLoading) return;
+    W.storeLoading = true;
+    api('/api/reference/fw/store?id=' + encodeURIComponent(id)).then(function (j) {
+      W.storeLoading = false;
+      if (!j.ok || String(id) !== String(W.sel)) return;
+      j.id = String(id); W.store = j; R.key = null; draw();
+      setTimeout(function () { W.tick++; R.key = null; draw(); }, 4000);                                  // иконки
+      if (!j.prices_at) setTimeout(function () { W.store = null; R.key = null; draw(); }, 8000);           // средние цены догружаются
+    }, function () { W.storeLoading = false; });
+  }
+  function drawFw() {
+    if (!W.data) { fwLoad(); $('rfBody').innerHTML = '<section class="panel"><p class="muted">Загружаю фракционные войны…</p></section>'; return; }
+    var d = W.data, f = d.factions;
+    if (!f.length) { $('rfBody').innerHTML = '<section class="panel"><p class="muted">Нет данных — нужен файл reference_fw.json (собирается скриптом build_reference_fw.py).</p></section>'; return; }
+    if (!W.sel || !f.some(function (x) { return String(x.militia_id) === W.sel; })) W.sel = String(f[0].militia_id);
+    var h = '<section class="panel"><h2>Фракционные войны <span class="muted small">фракции, милиции и их LP-магазины</span></h2>' +
+      '<p class="small" style="margin:4px 0">Вступить в войну — значит записаться в милицию фракции (в окне агентов или у корпорации милиции; нужна репутация у фракции не ниже 0). ' +
+      'Милиционеры захватывают комплексы в системах зоны боёв (плексинг), убивают пилотов вражеской милиции и выполняют задания милиции — за это начисляются LP милиции. ' +
+      'LP тратят в магазине милиции (на станциях милиции и фракции): навигационные и фракционные корабли, модули, импланты, копии чертежей. Вражеская милиция — законная цель везде, в том числе в хай-секе.</p>' +
+      '<p class="small muted" style="margin:4px 0 0">Статистика — из ESI' + (d.live_at ? ', обновлено ' + esc(L.fmtDateTime(d.live_at)) : d.online ? ' — загружаю…' : ' — онлайн-функции выключены') +
+      (d.live_error ? ' (ошибка: ' + esc(d.live_error) + ')' : '') + '. «Вчера» — за прошлые игровые сутки. Магазины выгружены ' + esc(d.built || '—') + '.</p>' +
+      '<div class="rf-fws">' + f.map(function (x) {
+        var l = x.live, on = String(x.militia_id) === W.sel, st = function (v) { return l ? L.fmtInt(v) : '—'; };
+        return '<div class="rf-fc' + (on ? ' on' : '') + '" style="border-left-color:' + (FCOL[x.id] || 'var(--muted)') + '">' +
+          '<div><h3>' + esc(x.ru) + (x.pirate ? ' <span class="rf-cat rf-pir">пираты</span>' : '') + '</h3><div class="en">' + esc(x.name) + ' · милиция <b>' + esc(x.militia) + '</b>' + (x.hq ? ' · штаб ' + esc(x.hq) : '') + '</div></div>' +
+          '<div class="rf-vs">Воюет с: ' + x.against_names.map(function (n) { return '<b>' + esc(n) + '</b>'; }).join(', ') + '</div>' +
+          (x.note ? '<div class="rf-sub">' + esc(x.note) + '</div>' : '') +
+          '<div class="rf-fst"><div><b>' + st(l && l.systems) + '</b><span>систем</span></div><div><b>' + st(l && l.contested) + '</b><span>оспаривается</span></div><div><b>' + st(l && l.pilots) + '</b><span>пилотов</span></div>' +
+          '<div><b>' + st(l && l.kills_day) + '</b><span>убийств вчера</span></div><div><b>' + st(l && l.kills_week) + '</b><span>за неделю</span></div><div><b>' + (l ? L.fmtCompact(l.vp_day) : '—') + '</b><span>очков победы вчера</span></div></div>' +
+          '<button type="button" class="btn' + (on ? ' primary' : '') + '" data-fw-sel="' + x.militia_id + '">LP-магазин · ' + x.offers + ' предложений</button></div>';
+      }).join('') + '</div></section>';
+    var fac = f.filter(function (x) { return String(x.militia_id) === W.sel; })[0];
+    if (!W.store || W.store.id !== W.sel) { fwStore(W.sel); h += '<section class="panel"><p class="muted">Загружаю магазин ' + esc(fac.militia) + '…</p></section>'; }
+    else h += fwShop(fac);
+    var focus = document.activeElement && document.activeElement.id === 'rfFwQ', pos = focus ? document.activeElement.selectionStart : 0;
+    $('rfBody').innerHTML = h;
+    if (focus) { var qi = $('rfFwQ'); qi.focus(); qi.setSelectionRange(pos, pos); }
+  }
+  function fwShop(fac) {
+    var st = W.store, q = W.q.trim().toLowerCase();
+    var rows = st.offers.filter(function (o) {
+      if (W.cat && String(o.cat) !== W.cat) return false;
+      if (W.priced && o.isk_lp === null) return false;
+      return !q || o.name.toLowerCase().indexOf(q) >= 0 || (o.ru && o.ru.toLowerCase().indexOf(q) >= 0) || o.group.toLowerCase().indexOf(q) >= 0;
+    });
+    var cmp = { isk_lp: function (a, b) { return (b.isk_lp === null ? -1e15 : b.isk_lp) - (a.isk_lp === null ? -1e15 : a.isk_lp); },
+      lp: function (a, b) { return a.lp - b.lp; }, lp_desc: function (a, b) { return b.lp - a.lp; }, name: function (a, b) { return a.name.localeCompare(b.name); } };
+    rows.sort(cmp[W.sort] || cmp.isk_lp);
+    var mat = function (m) { return '<span class="rf-m">' + ico(m.type_id, 'sm') + ELW_cp(m.name) + ' <b>×' + L.fmtInt(m.qty) + '</b></span>'; };
+    var h = '<section class="panel"><h2>LP-магазин: ' + esc(fac.militia) + ' <span class="muted small">' + esc(fac.ru) + '</span></h2>' +
+      '<div class="rf-bar"><span class="lbl">Что</span>' + chip('data-fw-cat', '', 'всё<span class="n">' + st.offers.length + '</span>', !W.cat) +
+      st.cats.map(function (c) { return chip('data-fw-cat', String(c[0]), esc(c[1]) + '<span class="n">' + c[2] + '</span>', W.cat === String(c[0])); }).join('') + '</div>' +
+      '<div class="rf-bar"><input id="rfFwQ" type="search" placeholder="Поиск: предмет или группа…" aria-label="Поиск в магазине" value="' + esc(W.q) + '" style="flex:1 1 220px;min-width:0">' +
+      '<select id="rfFwSort" aria-label="Сортировка"><option value="isk_lp"' + (W.sort === 'isk_lp' ? ' selected' : '') + '>ISK за LP — выгоднее</option>' +
+      '<option value="lp"' + (W.sort === 'lp' ? ' selected' : '') + '>LP — дешевле</option><option value="lp_desc"' + (W.sort === 'lp_desc' ? ' selected' : '') + '>LP — дороже</option>' +
+      '<option value="name"' + (W.sort === 'name' ? ' selected' : '') + '>по названию</option></select>' +
+      '<label class="small"><input type="checkbox" id="rfFwPriced"' + (W.priced ? ' checked' : '') + '> только с оценкой ISK/LP</label></div>' +
+      '<p class="small muted" style="margin:8px 0 0">Оценка — по средним ценам игры' + (st.prices_at ? ' (обновлено ' + esc(L.fmtDateTime(st.prices_at)) + ')' : ' — загружаю…') +
+      ': ISK за LP = (цена предмета × кол-во − ISK − цена нужных предметов) ÷ LP. Средняя цена — ориентир, перед покупкой сверяйтесь с рынком. ' +
+      'Для копий чертежей средней цены нет — у них оценки нет.</p></section>';
+    h += '<section class="panel"><div class="small muted" style="margin-bottom:6px">Показано: ' + Math.min(rows.length, 400) + ' из ' + rows.length + (rows.length > 400 ? ' — уточните поиск' : '') + '</div>' +
+      '<div class="tw"><table class="rf-t"><thead><tr><th class="l">Предмет</th><th class="r">Кол-во</th><th class="r">LP</th><th class="r">ISK</th><th class="l">Ещё нужно</th>' +
+      '<th class="r hide-m">Ценность</th><th class="r">ISK за LP</th></tr></thead><tbody>' +
+      rows.slice(0, 400).map(function (o) {
+        return '<tr><td class="l">' + ico(o.type_id) + '<span class="rf-nm">' + ELW_cp(o.name) + '</span>' + (o.ru ? ' <span class="rf-sub">' + esc(o.ru) + '</span>' : '') +
+          '<div class="rf-sub" style="padding-left:28px">' + esc(o.group) + '</div></td><td class="r">' + L.fmtInt(o.qty) + '</td><td class="r">' + L.fmtInt(o.lp) + '</td>' +
+          '<td class="r">' + (o.isk ? L.fmtCompact(o.isk) : '—') + '</td><td class="l rf-mats">' + (o.required.length ? o.required.map(mat).join('') : '<span class="rf-sub">—</span>') + '</td>' +
+          '<td class="r hide-m">' + (o.value ? L.fmtCompact(o.value) : '—') + '</td>' +
+          '<td class="r">' + (o.isk_lp === null ? '<span class="rf-sub">—</span>' : '<b class="' + (o.isk_lp > 0 ? 'rf-plus' : 'rf-minus') + '">' + L.fmtInt(o.isk_lp) + '</b>') + '</td></tr>';
+      }).join('') + (rows.length ? '' : '<tr><td colspan="7" class="muted">Ничего не нашлось.</td></tr>') + '</tbody></table></div></section>';
+    return h;
+  }
+  document.addEventListener('click', function (e) {
+    var body = $('rfBody');
+    if (!body || !body.contains(e.target) || R.section !== 'fw') return;
+    var b = e.target.closest('[data-fw-sel],[data-fw-cat]');
+    if (!b) return;
+    if (b.hasAttribute('data-fw-sel')) { W.sel = b.getAttribute('data-fw-sel'); W.cat = ''; }
+    else W.cat = b.getAttribute('data-fw-cat');
+    fwRemember(); R.key = null; draw();
+  });
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'rfFwSort') { W.sort = e.target.value; fwRemember(); R.key = null; draw(); }
+    if (e.target && e.target.id === 'rfFwPriced') { W.priced = e.target.checked; fwRemember(); R.key = null; draw(); }
+  });
+  var tfq = null;
+  document.addEventListener('input', function (e) { if (e.target && e.target.id === 'rfFwQ') { var v = e.target.value; clearTimeout(tfq); tfq = setTimeout(function () { W.q = v; R.key = null; draw(); }, 200); } });
   R.ready = true;
   setTimeout(function () { if ($('rfSections') && $('rfSections').offsetParent) draw(); }, 0);   // вкладка уже открыта при запуске
 })(window.ELW);
