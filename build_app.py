@@ -96,7 +96,32 @@ def main() -> int:
         json.dump(updater.build_index(eve_log_watcher.VERSION, entries), f, ensure_ascii=False, indent=2)
     print(f"Готово: {app_dir}/{NAME}{'' if LINUX else '.exe'} ({size // 2**20} МБ), архив {archive} "
           f"({os.path.getsize(archive) // 2**20} МБ), модулей: {len(mods)}")
+    bad = defender_check([archive] + [e["path"] for e in entries])
+    if bad:
+        print("ВНИМАНИЕ: Защитник Windows считает угрозой: " + ", ".join(bad) +
+              " — не выкладывать; пересоберите (эвристика «!ml» цепляется за конкретные байты архива).")
+        return 2
     return 0
+
+
+def defender_check(paths: list) -> list:
+    """Проверить архивы Защитником Windows (только отчёт, без удаления): что он считает угрозой. Не Windows — пусто."""
+    mp = os.path.join(os.environ.get("ProgramFiles", ""), "Windows Defender", "MpCmdRun.exe")
+    if LINUX or not os.path.isfile(mp):
+        return []
+    bad = []
+    for p in paths:
+        try:
+            open(p, "rb").close()                              # архив уже заблокирован защитой в реальном времени
+        except OSError:
+            bad.append(p)
+            continue
+        r = subprocess.run([mp, "-Scan", "-ScanType", "3", "-File", os.path.abspath(p), "-DisableRemediation"],
+                           capture_output=True, text=True, errors="replace")
+        if "Threat" in r.stdout:
+            bad.append(p)
+    print(f"Защитник Windows: проверено архивов {len(paths)}, угроз: {len(bad)}")
+    return bad
 
 
 if __name__ == "__main__":
