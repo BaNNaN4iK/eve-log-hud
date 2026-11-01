@@ -125,8 +125,9 @@
       '.pj-hb .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pj-hb .tr{height:10px;background:var(--panel);border-radius:5px;overflow:hidden}.pj-hb .tr>div{height:100%;border-radius:5px}.pj-hb .vl{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}',
     html: '<div class="in-views" role="tablist" aria-label="Экран производства"><button type="button" class="in-chip" id="inViewScan" role="tab">Сканер прибыльности</button>' +
       '<button type="button" class="in-chip" id="inViewPlan" role="tab">План производства</button>' +
-      '<button type="button" class="in-chip" id="inViewProj" role="tab">📌 Ведение производства</button></div>' +
-      '<div id="inScanView"></div><div id="inPlanView"></div><div id="inProjView"></div>',
+      '<button type="button" class="in-chip" id="inViewProj" role="tab">📌 Ведение производства</button>' +
+      '<button type="button" class="in-chip" id="inViewPi" role="tab">🪐 Планетарка</button></div>' +
+      '<div id="inScanView"></div><div id="inPlanView"></div><div id="inProjView"></div><div id="inPiView"></div>',
     render: function () { if (I && I.ready) renderTab(); } });   // ядро может позвать сразу из addTab — модуль ещё не готов
 
   function renderTab() {
@@ -135,12 +136,13 @@
     var X = window.ELW_INDUSTRY || {};
     if (I.view === 'scan') { if (X.scanner) X.scanner.render(); return; }
     if (I.view === 'plan') { if (X.plan) X.plan.render(); return; }
+    if (I.view === 'pi') { if (X.pi) X.pi.render(); return; }
     if (X.projects) X.projects.render();
   }
 
   var I = { inited: false, view: 'scan', defaults: null, waiting: [] };
-  try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'plan' ? 'plan' : v0 === 'proj' || v0 === 'calc' ? 'proj' : 'scan'; } catch (e) { }
-  var VIEWS = [['scan', 'inScanView', 'inViewScan'], ['plan', 'inPlanView', 'inViewPlan'], ['proj', 'inProjView', 'inViewProj']];
+  try { var v0 = localStorage.getItem('elw.industry.view'); I.view = v0 === 'plan' || v0 === 'pi' ? v0 : v0 === 'proj' || v0 === 'calc' ? 'proj' : 'scan'; } catch (e) { }
+  var VIEWS = [['scan', 'inScanView', 'inViewScan'], ['plan', 'inPlanView', 'inViewPlan'], ['proj', 'inProjView', 'inViewProj'], ['pi', 'inPiView', 'inViewPi']];
   function showView() {
     VIEWS.forEach(function (v) {
       $(v[1]).hidden = I.view !== v[0];
@@ -156,6 +158,7 @@
     if (v === 'scan' && X.scanner) X.scanner.render(true);
     if (v === 'plan' && X.plan) X.plan.render();
     if (v === 'proj' && X.projects) X.projects.render(true);
+    if (v === 'pi' && X.pi) X.pi.render();
     window.scrollTo(0, 0);
   }
   VIEWS.forEach(function (v) { $(v[2]).addEventListener('click', function () { setView(v[0]); }); });

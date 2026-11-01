@@ -1554,6 +1554,81 @@ class Projects:
 # Подключение к трекеру
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Планетарка: цепочка P4 → P0, циклы, фабрики, сырьё и типы планет (pi_data.json, build_pi_data.py)
+# ---------------------------------------------------------------------------
+
+PI_FACTORY = {1: "Basic Industry Facility", 2: "Advanced Industry Facility", 3: "Advanced Industry Facility",
+              4: "High-Tech Production Plant"}                           # что строит уровень (P4 — только на barren / temperate)
+PI_PLANETS = {"barren": "Barren", "gas": "Gas", "ice": "Ice", "lava": "Lava", "oceanic": "Oceanic", "plasma": "Plasma",
+              "storm": "Storm", "temperate": "Temperate"}
+
+
+def load_pi(path: Optional[str] = None) -> dict:
+    try:
+        with open(path or os.path.join(HERE, "pi_data.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"schematics": {}, "types": {}, "planets": {}}
+
+
+def pi_catalog(d: dict) -> List[list]:
+    """Что можно строить на планетах: [type_id, название, уровень], по уровню и названию."""
+    T = d.get("types") or {}
+    return sorted(([int(k), T[k][0], T[k][2]] for k in d.get("schematics") or {} if k in T), key=lambda r: (r[2], r[1].casefold()))
+
+
+def pi_cover(need: List[set]) -> List[str]:
+    """Наименьший набор типов планет, на котором добывается всё нужное сырьё (каждому сырью — хотя бы одна планета)."""
+    kinds = sorted(PI_PLANETS)
+    best = None
+    for mask in range(1, 1 << len(kinds)):
+        pick = {k for i, k in enumerate(kinds) if mask >> i & 1}
+        if all(n & pick for n in need) and (best is None or len(pick) < len(best)):
+            best = pick
+    return sorted(best or [])
+
+
+def pi_plan(d: dict, items: List[Tuple[int, int]], days: float = 7) -> dict:
+    """Цепочка на заказ: сколько циклов каждого шага, сколько фабрик держать, чтобы уложиться в days суток, сколько сырья P0
+    и где его добывать. Нужды по одному продукту складываются по всем веткам до округления до целых циклов."""
+    S, T = d.get("schematics") or {}, d.get("types") or {}
+    days = max(float(days or 0), 1 / 24)
+    need: Dict[int, int] = {}
+    for tid, qty in items:
+        if str(tid) in T and qty > 0:
+            need[tid] = need.get(tid, 0) + int(qty)
+    targets = dict(need)
+    name = lambda t: (T.get(str(t)) or [str(t)])[0]
+    level = lambda t: (T.get(str(t)) or ["", "", 0])[2]
+    steps = []
+    for lv in (4, 3, 2, 1):                                   # сверху вниз: нужда нижнего уровня собрана со всех веток
+        for tid in sorted((t for t in need if level(t) == lv), key=name):
+            sch = S.get(str(tid))
+            if not sch or need[tid] <= 0:
+                continue
+            cycle, out_qty, ins = sch
+            runs = math.ceil(need[tid] / out_qty)
+            for i, q in ins:
+                need[i] = need.get(i, 0) + runs * q
+            busy = runs * cycle
+            steps.append({"type_id": tid, "name": name(tid), "level": lv, "need": need[tid], "produced": runs * out_qty,
+                          "left": runs * out_qty - need[tid], "target": targets.get(tid, 0), "runs": runs, "cycle": cycle,
+                          "out": out_qty, "busy": busy, "factory": PI_FACTORY[lv], "factories": math.ceil(busy / (days * 86400)),
+                          "inputs": [{"type_id": i, "name": name(i), "qty": runs * q, "per_cycle": q} for i, q in ins]})
+    planets = d.get("planets") or {}
+    raw = [{"type_id": t, "name": name(t), "qty": q, "per_hour": math.ceil(q / (days * 24)), "planets": planets.get(str(t), []),
+            "volume": q * T[str(t)][3]} for t, q in sorted(need.items(), key=lambda x: name(x[0])) if level(t) == 0]
+    vol = {}
+    for st in steps:
+        vol[st["level"]] = vol.get(st["level"], 0) + st["produced"] * T[str(st["type_id"])][3]
+    return {"days": days, "steps": steps, "raw": raw, "cover": pi_cover([set(r["planets"]) for r in raw if r["planets"]]),
+            "targets": [{"type_id": t, "name": name(t), "level": level(t), "qty": q} for t, q in targets.items()],
+            "volume": {str(k): round(v, 2) for k, v in vol.items()}, "raw_volume": round(sum(r["volume"] for r in raw), 2),
+            "factories": sum(st["factories"] for st in steps), "cycles": sum(st["runs"] for st in steps),
+            "high_tech": any(st["level"] == 4 for st in steps)}
+
+
 def setup(ctx) -> None:
     data = load_data()
     if not data.get("bp"):
@@ -1887,7 +1962,31 @@ def setup(ctx) -> None:
     ctx.get("/api/industry/projects", projects_list)
     ctx.get("/api/industry/project", project_get)
     ctx.post("/api/industry/projects", projects_post)
+    pid = load_pi()
+
+    def pi_cat(qs):
+        return {"ok": True, "items": pi_catalog(pid), "planets": PI_PLANETS, "pi_ids": [int(k) for k in pid.get("types") or {}],
+                "built": pid.get("built")}
+
+    def pi_calc(body, qs=None):
+        raw = (body or {}).get("items") if isinstance(body, dict) else None
+        items = []
+        for it in raw if isinstance(raw, list) else []:
+            try:
+                items.append((int(it["id"]), max(0, min(10 ** 9, int(float(it.get("qty") or 0))))))
+            except (TypeError, ValueError, KeyError):
+                continue
+        try:
+            days = float((body or {}).get("days") or 7)
+        except (TypeError, ValueError):
+            days = 7
+        res = pi_plan(pid, items, max(1 / 24, min(days, 365)))
+        icons([r["type_id"] for r in res["steps"]] + [r["type_id"] for r in res["raw"]])
+        return {"ok": True, **res}
+
     ctx.get("/api/industry/catalog", catalog)
+    ctx.get("/api/industry/pi/catalog", pi_cat)
+    ctx.post("/api/industry/pi/calc", pi_calc)
     ctx.post("/api/industry/plan", plan)
     ctx.get("/api/industry/plans", plans)
     ctx.post("/api/industry/plans", plans_save)

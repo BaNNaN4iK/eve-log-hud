@@ -563,3 +563,54 @@ class TestProjectsHttp(unittest.TestCase):
             srv.server_close()
         finally:
             td.cleanup()
+
+
+class TestPlanetary(unittest.TestCase):
+    """Планетарка: цепочка P4 → P0 по схемам из SDE (pi_data.json)."""
+
+    D = {"schematics": {"10": [3600, 1, [[20, 6], [21, 6]]],        # P4 ← 2 × P3
+                        "20": [3600, 3, [[30, 10], [31, 10]]],      # P3 ← 2 × P2
+                        "21": [3600, 3, [[30, 10]]],
+                        "30": [3600, 5, [[40, 40], [41, 40]]],      # P2 ← 2 × P1
+                        "31": [3600, 5, [[40, 40]]],
+                        "40": [1800, 20, [[50, 3000]]],             # P1 ← P0
+                        "41": [1800, 20, [[51, 3000]]]},
+         "types": {"10": ["Node", "", 4, 100], "20": ["Chip", "", 3, 6], "21": ["Neo", "", 3, 6], "30": ["Glass", "", 2, 1.5],
+                   "31": ["Fiber", "", 2, 1.5], "40": ["Water", "", 1, 0.38], "41": ["Oxygen", "", 1, 0.38],
+                   "50": ["Aqueous Liquids", "", 0, 0.01], "51": ["Noble Gas", "", 0, 0.01]},
+         "planets": {"50": ["barren", "gas", "ice"], "51": ["gas", "ice", "storm"]}}
+
+    def test_chain_sums_needs_before_rounding(self):
+        r = ind.pi_plan(self.D, [(10, 2)], days=1)
+        st = {s["type_id"]: s for s in r["steps"]}
+        self.assertEqual((st[10]["runs"], st[20]["need"], st[21]["need"]), (2, 12, 12))
+        self.assertEqual((st[20]["runs"], st[21]["runs"]), (4, 4))          # 12 / 3 за цикл
+        self.assertEqual(st[30]["need"], 80)                                # Glass нужен обоим P3: 40 + 40 — сложили, потом округлили
+        self.assertEqual((st[30]["runs"], st[31]["runs"]), (16, 8))
+        self.assertEqual(st[40]["need"], 16 * 40 + 8 * 40)                  # Water — в Glass и в Fiber
+        self.assertEqual(st[40]["runs"], 48)                                # 960 / 20
+        raw = {x["type_id"]: x for x in r["raw"]}
+        self.assertEqual(raw[50]["qty"], 48 * 3000)
+        self.assertEqual(raw[50]["per_hour"], 6000)                         # за сутки
+        self.assertEqual(st[40]["factories"], 1)                            # 48 циклов × 30 мин = 24 ч — одна фабрика за сутки
+        self.assertEqual(r["cover"], ["gas"])                               # одна планета даёт оба сырья
+        self.assertTrue(r["high_tech"])
+
+    def test_leftovers_targets_and_factories(self):
+        r = ind.pi_plan(self.D, [(30, 7), (40, 5)], days=0.5)
+        st = {s["type_id"]: s for s in r["steps"]}
+        self.assertEqual((st[30]["runs"], st[30]["produced"], st[30]["left"]), (2, 10, 3))
+        self.assertEqual((st[40]["target"], st[40]["need"]), (5, 5 + 80))   # заказано 5 и нужно 80 на Glass
+        self.assertEqual(st[40]["runs"], 5)
+        self.assertEqual(st[30]["factories"], 1)
+        self.assertFalse(r["high_tech"])
+        self.assertEqual(ind.pi_plan(self.D, [(999, 5), (10, 0)])["steps"], [])   # неизвестное и ноль — пропускаем
+
+    def test_game_data(self):
+        d = ind.load_pi()
+        cat = ind.pi_catalog(d)
+        self.assertEqual(len(cat), 68)                                      # 15 P1 + 24 P2 + 21 P3 + 8 P4
+        self.assertEqual(sorted({r[2] for r in cat}), [1, 2, 3, 4])
+        self.assertEqual(len(d["planets"]), 15)                             # у каждого сырья P0 — типы планет
+        r = ind.pi_plan(d, [(cat[-1][0], 1)])
+        self.assertTrue(r["raw"] and all(x["planets"] for x in r["raw"]))
