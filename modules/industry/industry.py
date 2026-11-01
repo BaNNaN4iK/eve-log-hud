@@ -1720,7 +1720,8 @@ def pi_layout(d: dict, res: dict, cc: int = 5, head_h: float = 500, margin: floa
                 p1[p1_of[t]] = p1.get(p1_of[t], 0) + h / 150 * 24                  # 3000 P0 → 20 P1, в сутки
         pl["p1"] = p1
         pl["extract"] = [{"type_id": t, "name": name(t), "per_hour": round(h), "heads": math.ceil(h / head_h - 1e-9),
-                          "ecu": math.ceil(math.ceil(h / head_h - 1e-9) / PI_HEADS), "basic": math.ceil(h / PI_BASIC_RATE - 1e-9)}
+                          "ecu": math.ceil(math.ceil(h / head_h - 1e-9) / PI_HEADS), "basic": math.ceil(h / PI_BASIC_RATE - 1e-9),
+                          "p1": {"type_id": p1_of[t], "name": name(p1_of[t]), "per_day": round(h / 150 * 24)} if t in p1_of else None}
                          for t, h in pl["ex"].items()]
         pl["local_p2"] = [] if local else [name(t) for t, st in need_p2.items() if all(i["type_id"] in p1 for i in st["inputs"])]
 

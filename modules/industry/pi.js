@@ -43,6 +43,14 @@
     '.pi-row{display:flex;align-items:center;gap:6px;justify-content:space-between}.pi-row .in-ico{width:16px;height:16px;margin-right:4px}.pi-row b{font-variant-numeric:tabular-nums;white-space:nowrap}' +
     '.pi-load{height:6px;background:var(--panel);border-radius:3px;overflow:hidden}.pi-load>div{height:100%;background:var(--c)}' +
     '.pi-num{width:90px;box-sizing:border-box;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;text-align:right;font:inherit}' +
+    '.pi-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:30px 12px;overflow:auto}' +
+    '.pi-dlg{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:1240px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);padding:14px 16px}' +
+    '.pi-dh{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.pi-dh h2{margin:0;font-size:17px}.pi-dx{margin-left:auto;font-size:20px;background:none;border:0;color:var(--muted);cursor:pointer}' +
+    '.pi-sv{overflow:auto;margin-top:10px;background:var(--panel2);border-radius:10px;padding:8px}.pi-sv svg{display:block}' +
+    '.pi-sv .bx{fill:var(--panel);stroke:var(--line);stroke-width:1.2}.pi-sv .bx.hub{stroke:var(--accent);stroke-width:2}.pi-sv .bx.io{stroke-dasharray:4 3}' +
+    '.pi-sv text{fill:var(--text);font:12px system-ui,Segoe UI,sans-serif}.pi-sv text.m{fill:var(--muted);font-size:11px}.pi-sv text.t{font-weight:700;font-size:12.5px}' +
+    '.pi-sv .ar{fill:none;stroke:var(--muted);stroke-width:1.4}.pi-sv .ar.in{stroke:var(--good)}.pi-sv .ar.out{stroke:var(--accent)}.pi-sv .hd{fill:var(--c)}' +
+    '.pi-steps{margin:10px 0 0;padding-left:20px;font-size:13px;line-height:1.55}' +
     '@media(max-width:900px){.pi-layout{grid-template-columns:1fr}.pi-side{position:static;max-height:420px}}';
   document.head.appendChild(st);
 
@@ -171,6 +179,7 @@
       var c = p.role === 'extract' ? (PL_COL[p.kind] || 'var(--muted)') : 'var(--accent)';
       h += '<div class="pi-card" style="--c:' + c + '"><h3>Планета ' + n + ' · ' + (p.role === 'extract' ? 'добыча ' + planet(p.kind) : 'завод' + (p.kind ? ' <span class="pi-pl" style="--c:#b39a7a">Barren</span><span class="pi-pl" style="--c:#5fb85f">Temperate</span>' : ' <span class="small muted">любой тип</span>')) + '</h3>' +
         bar(p.pg, lay.pg, 'МВт', 'энергия') + bar(p.cpu, lay.cpu, 'tf', 'процессор') +
+        '<button type="button" class="btn" data-pi-scheme="' + (n - 1) + '" style="align-self:flex-start;padding:3px 10px;font-size:12px">Показать шаблон</button>' +
         '<div class="small muted">' + Object.keys(p.structures).map(function (k) { return esc(STRUCT[k] || k) + ' ' + p.structures[k]; }).join(' · ') + '</div>';
       if (p.role === 'extract') {
         h += '<div class="k">Добывать</div>' + p.extract.map(function (e) {
@@ -185,6 +194,117 @@
     });
     return h + '</div></section>';
   }
+  // ----- шаблон планеты: схема построек и маршрутов (по ней строится колония в игре) -----
+  var BW = 230, BH = 46, GY = 12, CX = [16, 300, 584, 868], PAD = 16;
+  function svgEsc(t) { return esc(t); }
+  function box(x, y, h, title, sub, cls, icon) {
+    return '<rect class="bx ' + (cls || '') + '" x="' + x + '" y="' + y + '" width="' + BW + '" height="' + h + '" rx="8"/>' +
+      (icon ? '<image href="' + ELW.base + '/icons/' + icon + '.png" x="' + (x + 8) + '" y="' + (y + (h - 26) / 2) + '" width="26" height="26"/>' : '') +
+      '<text class="t" x="' + (x + (icon ? 42 : 10)) + '" y="' + (y + 19) + '">' + svgEsc(title) + '</text>' +
+      (sub ? '<text class="m" x="' + (x + (icon ? 42 : 10)) + '" y="' + (y + 35) + '">' + svgEsc(sub) + '</text>' : '');
+  }
+  function arrow(x1, y1, x2, y2, cls, label) {
+    var mx = (x1 + x2) / 2;
+    return '<path class="ar ' + (cls || '') + '" d="M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '" marker-end="url(#piArr)"/>' +
+      (label ? '<text class="m" x="' + (mx + 4) + '" y="' + ((y1 + y2) / 2 - 4) + '">' + svgEsc(label) + '</text>' : '');
+  }
+  function scheme(p, idx, lay) {
+    var col = [[], [], [], []], arrows = [], hubY, hubH;
+    var c = p.role === 'extract' ? (PL_COL[p.kind] || '#8a94a3') : 'var(--accent)';
+    // колонка 1 — экстракторы (каждый ECU — свой блок с головками), колонка 2 — базовые фабрики
+    (p.extract || []).forEach(function (e) {
+      var heads = e.heads, ecus = [];
+      for (var i = 0; i < e.ecu; i++) { var hn = Math.min(10, heads); heads -= hn; ecus.push(hn); }
+      var first = col[0].length;
+      ecus.forEach(function (hn, i) { col[0].push({ kind: 'ecu', e: e, heads: hn, n: i + 1, of: ecus.length }); });
+      col[1].push({ kind: 'basic', e: e, from: [first, col[0].length - 1] });
+    });
+    (p.make || []).forEach(function (m) { col[3].push({ kind: 'make', m: m }); });
+    var rows = Math.max(col[0].length, col[1].length, col[3].length, 3);
+    var height = PAD * 2 + rows * (BH + GY) - GY + 150;
+    var yOf = function (i, n) { var total = n * (BH + GY) - GY, top = PAD + (rows * (BH + GY) - GY - total) / 2; return top + i * (BH + GY); };
+    var h = '';
+    col[0].forEach(function (it, i) {
+      var y = yOf(i, col[0].length);
+      it.y = y;
+      h += box(CX[0], y, BH, 'Экстрактор: ' + it.e.name, it.heads + ' головок' + (it.of > 1 ? ' · ' + it.n + ' из ' + it.of : '') + ' · ≈' + L.fmtInt(Math.round(it.heads * lay.head_h)) + '/ч', '', it.e.type_id);
+      for (var k = 0; k < it.heads; k++) h += '<circle class="hd" style="--c:' + c + '" cx="' + (CX[0] + BW - 12 - k * 9) + '" cy="' + (y + BH - 8) + '" r="3"/>';
+    });
+    col[1].forEach(function (it, i) {
+      var y = yOf(i, col[1].length);
+      it.y = y;
+      h += box(CX[1], y, BH, 'Базовая фабрика ×' + it.e.basic, (it.e.p1 ? '→ ' + it.e.p1.name : ''), '', it.e.p1 ? it.e.p1.type_id : 0);
+      for (var j = it.from[0]; j <= it.from[1]; j++) arrows.push(arrow(CX[0] + BW, col[0][j].y + BH / 2, CX[1], y + BH / 2, '', j === it.from[0] ? L.fmtInt(it.e.per_hour) + ' P0/ч' : ''));
+    });
+    // колонка 3 — космопорт (через него все маршруты), ниже — командный центр
+    hubH = Math.max(BH * 2, Math.min(rows, 4) * (BH + GY) - GY);
+    hubY = PAD + (rows * (BH + GY) - GY - hubH) / 2;
+    h += '<rect class="bx hub" x="' + CX[2] + '" y="' + hubY + '" width="' + BW + '" height="' + hubH + '" rx="10"/>' +
+      '<text class="t" x="' + (CX[2] + 12) + '" y="' + (hubY + 22) + '">Космопорт (Launchpad)</text>' +
+      '<text class="m" x="' + (CX[2] + 12) + '" y="' + (hubY + 40) + '">хранилище: всё приходит сюда</text>' +
+      '<text class="m" x="' + (CX[2] + 12) + '" y="' + (hubY + 56) + '">и отсюда раздаётся по фабрикам</text>';
+    var hubMid = hubY + hubH / 2;
+    col[1].forEach(function (it) { arrows.push(arrow(CX[1] + BW, it.y + BH / 2, CX[2], hubMid, 'out', it.e.p1 ? L.fmtInt(it.e.p1.per_day) + '/сут' : '')); });
+    // колонка 4 — продвинутые фабрики: входы с космопорта, выход обратно
+    col[3].forEach(function (it, i) {
+      var y = yOf(i, col[3].length), m = it.m;
+      h += box(CX[3], y, BH, 'P' + m.level + ' ×' + m.factories + ' ' + m.name, m.inputs.map(function (x) { return x.name; }).join(' + '), '', m.type_id);
+      arrows.push(arrow(CX[2] + BW, hubMid - 6, CX[3], y + BH / 2 - 6, 'in', ''));
+      arrows.push(arrow(CX[3], y + BH / 2 + 6, CX[2] + BW, hubMid + 6, 'out', ''));
+    });
+    // ввоз / вывоз — снизу, через космопорт
+    var ioY = PAD + rows * (BH + GY) - GY + 40, ioH = 90;
+    var imp = (p.import || []).map(function (x) { return x.name + ' ' + L.fmtInt(x.per_day); }).join(', ');
+    var exp = (p.export || []).map(function (x) { return x.name + ' ' + L.fmtInt(x.per_day); }).join(', ');
+    var wrap = function (t, x, y) {
+      var out = '', line = '', parts = t.split(', '), ly = y;
+      parts.forEach(function (w) { if ((line + w).length > 34) { out += '<text class="m" x="' + x + '" y="' + ly + '">' + svgEsc(line) + '</text>'; ly += 15; line = ''; } line += (line ? ', ' : '') + w; });
+      return out + (line ? '<text class="m" x="' + x + '" y="' + ly + '">' + svgEsc(line) + '</text>' : '');
+    };
+    h += '<rect class="bx io" x="' + CX[1] + '" y="' + ioY + '" width="' + BW + '" height="' + ioH + '" rx="8"/><text class="t" x="' + (CX[1] + 10) + '" y="' + (ioY + 19) + '">Ввоз в сутки</text>' +
+      (imp ? wrap(imp, CX[1] + 10, ioY + 37) : '<text class="m" x="' + (CX[1] + 10) + '" y="' + (ioY + 37) + '">ничего</text>');
+    h += '<rect class="bx io" x="' + CX[3] + '" y="' + ioY + '" width="' + BW + '" height="' + ioH + '" rx="8"/><text class="t" x="' + (CX[3] + 10) + '" y="' + (ioY + 19) + '">Вывоз в сутки</text>' +
+      (exp ? wrap(exp, CX[3] + 10, ioY + 37) : '<text class="m" x="' + (CX[3] + 10) + '" y="' + (ioY + 37) + '">ничего</text>');
+    if (imp) arrows.push(arrow(CX[1] + BW, ioY + 30, CX[2] + 30, hubY + hubH, 'in', ''));
+    if (exp) arrows.push(arrow(CX[2] + BW - 30, hubY + hubH, CX[3], ioY + 30, 'out', ''));
+    var W = CX[3] + BW + PAD;
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + height + '" style="width:100%;max-width:' + W + 'px;height:auto;min-width:640px" role="img" aria-label="Схема планеты">' +
+      '<defs><marker id="piArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>' +
+      arrows.join('') + h + '</svg>';
+    // по шагам — что ставить в игре
+    var st = p.structures || {}, steps = [];
+    steps.push('Командный центр уровня ' + lay.cc + (p.role === 'extract' ? ' на планете ' + (Q.planets[p.kind] || p.kind) : p.kind ? ' на Barren или Temperate' : '') + '; рядом — космопорт (Launchpad).');
+    (p.extract || []).forEach(function (e) {
+      steps.push('Экстракторы на ' + e.name + ': ' + e.ecu + ' шт., всего ' + e.heads + ' головок (≈' + L.fmtInt(e.per_hour) + ' P0/ч); маршрут — в базовые фабрики.');
+      if (e.p1) steps.push('Базовые фабрики ×' + e.basic + ' со схемой ' + e.p1.name + '; выход — маршрутом в космопорт.');
+    });
+    (p.make || []).forEach(function (m) {
+      steps.push((m.level === 4 ? 'High-Tech Production Plant' : 'Advanced Industry Facility') + ' ×' + m.factories + ' со схемой ' + m.name + ' (' + m.inputs.map(function (x) { return x.name; }).join(' + ') +
+        '); входы — маршрутами из космопорта, выход — в космопорт.');
+    });
+    if ((p.import || []).length) steps.push('Ввоз через таможню или космопорт: ' + imp + ' в сутки.');
+    if ((p.export || []).length) steps.push('Вывоз из космопорта: ' + exp + ' в сутки.');
+    steps.push('Все постройки соединить линками с космопортом (звездой). Энергия ' + L.fmtInt(p.pg) + ' / ' + L.fmtInt(lay.pg) + ' МВт, процессор ' + L.fmtInt(p.cpu) + ' / ' + L.fmtInt(lay.cpu) + ' tf — без учёта линков.');
+    return '<div class="pi-modal" id="piModal" role="dialog" aria-modal="true" aria-label="Шаблон планеты ' + (idx + 1) + '"><div class="pi-dlg">' +
+      '<div class="pi-dh"><h2>Шаблон: планета ' + (idx + 1) + ' · ' + (p.role === 'extract' ? 'добыча ' + planet(p.kind) : 'завод') + '</h2>' +
+      '<span class="small muted">' + Object.keys(st).map(function (k) { return esc(STRUCT[k] || k) + ' ' + st[k]; }).join(' · ') + '</span>' +
+      '<button type="button" class="pi-dx" data-pi-close aria-label="Закрыть">✕</button></div>' +
+      '<div class="pi-sv">' + svg + '</div><ol class="pi-steps">' + steps.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ol>' +
+      '<p class="small muted" style="margin:6px 0 0">Схема логическая: расположение на планете выбирайте по горячим точкам сырья; стрелки — маршруты (Routes). Зелёные — из космопорта в фабрику, синие — в космопорт.</p></div></div>';
+  }
+  function openScheme(i) {
+    var lay = Q.res && Q.res.layout, p = lay && lay.planets[i];
+    if (!p) return;
+    var old = $('piModal'); if (old) old.remove();
+    document.body.insertAdjacentHTML('beforeend', scheme(p, i, lay));
+  }
+  document.addEventListener('click', function (e) {
+    var m = $('piModal');
+    if (m && (e.target === m || e.target.closest('[data-pi-close]'))) { m.remove(); return; }
+    var b = e.target.closest && e.target.closest('[data-pi-scheme]');
+    if (b) openScheme(+b.getAttribute('data-pi-scheme'));
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $('piModal')) $('piModal').remove(); });
   function add(id, qty) {
     var cur = Q.items.filter(function (i) { return i.id === id; })[0];
     if (cur) cur.qty = qty !== undefined ? qty : cur.qty;
