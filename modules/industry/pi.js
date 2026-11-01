@@ -7,12 +7,13 @@
   var POST = { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' };
   var LV = { 0: 'P0 сырьё', 1: 'P1', 2: 'P2', 3: 'P3', 4: 'P4' };
   var PL_COL = { barren: '#b39a7a', gas: '#d9c56b', ice: '#9fd4ee', lava: '#e0654a', oceanic: '#4a8fd9', plasma: '#c86ad9', storm: '#7f8fb0', temperate: '#5fb85f' };
-  var Q = { built: false, cat: null, planets: {}, piIds: {}, items: [], days: 7, lv: '', q: '', res: null, busy: false, msg: '', extract: 6000, per: 18, mode: 'factory', slots: 6 };
+  var Q = { built: false, cat: null, planets: {}, piIds: {}, items: [], days: 7, lv: '', q: '', res: null, busy: false, msg: '', cc: 5, head: 500, margin: 10, mode: 'factory', reserve: 4 };
   try {
     var sv = JSON.parse(localStorage.getItem('elw.industry.pi') || '{}');
-    Q.items = Array.isArray(sv.items) ? sv.items : []; Q.days = +sv.days || 7; Q.extract = +sv.extract || 6000; Q.per = +sv.per || 18; Q.mode = sv.mode === 'local' ? 'local' : 'factory'; Q.slots = sv.slots >= 0 ? +sv.slots : 6;
+    Q.items = Array.isArray(sv.items) ? sv.items : []; Q.days = +sv.days || 7; Q.mode = sv.mode === 'local' ? 'local' : 'factory';
+    Q.cc = sv.cc >= 0 && sv.cc <= 5 ? +sv.cc : 5; Q.head = +sv.head || 500; Q.margin = sv.margin >= 0 ? +sv.margin : 10; Q.reserve = sv.reserve >= 0 ? +sv.reserve : 4;
   } catch (e) { }
-  function remember() { try { localStorage.setItem('elw.industry.pi', JSON.stringify({ items: Q.items, days: Q.days, extract: Q.extract, per: Q.per, mode: Q.mode, slots: Q.slots })); } catch (e) { } }
+  function remember() { try { localStorage.setItem('elw.industry.pi', JSON.stringify({ items: Q.items, days: Q.days, cc: Q.cc, head: Q.head, margin: Q.margin, mode: Q.mode, reserve: Q.reserve })); } catch (e) { } }
   function ico(t) { return ELW_INDUSTRY.ico ? ELW_INDUSTRY.ico(t) : ''; }
   function cp(n) { return ELW_INDUSTRY.cp ? ELW_INDUSTRY.cp(n) : esc(n); }
   function vol(v) { return L.fmtInt(Math.round(v)) + ' м³'; }
@@ -92,7 +93,7 @@
     clearTimeout(timer);
     if (!Q.items.length) { Q.res = null; drawRes(); return; }
     timer = setTimeout(function () {
-      api('/api/industry/pi/calc', { method: 'POST', headers: POST, body: JSON.stringify({ items: Q.items, days: Q.days, extract_h: Q.extract, per_planet: Q.per, mode: Q.mode, local_slots: Q.slots }) }).then(function (j) {
+      api('/api/industry/pi/calc', { method: 'POST', headers: POST, body: JSON.stringify({ items: Q.items, days: Q.days, cc: Q.cc, head_h: Q.head, margin: Q.margin, mode: Q.mode, reserve: Q.reserve }) }).then(function (j) {
         if (j.ok) { Q.res = j; drawRes(); setTimeout(drawRes, 3000); }                       // иконки догружаются
       });
     }, 150);
@@ -132,39 +133,53 @@
     });
     box.innerHTML = h;
   }
+  var STRUCT = { pad: 'космопорт', ecu: 'экстракторы', head: 'головки', basic: 'базовые фабрики', '2': 'продвинутые P2', '3': 'продвинутые P3', '4': 'High-Tech P4' };
   function layout(lay) {
-    if (!lay || !lay.planets.length) return '';
+    if (!lay) return '';
     var row = function (x, v, unit) { return '<div class="pi-row"><span>' + ico(x.type_id) + esc(x.name) + '</span><b>' + L.fmtInt(v) + ' ' + unit + '</b></div>'; };
+    var bar = function (v, max, unit, what) {
+      var pct = Math.min(100, v * 100 / max);
+      return '<div class="pi-row" title="' + esc(what + ': ' + L.fmtInt(v) + ' из ' + L.fmtInt(max) + ' ' + unit) + '"><span class="small muted" style="width:76px">' + what + '</span>' +
+        '<div class="pi-load" style="flex:1"><div style="width:' + pct + '%;' + (pct > 95 ? 'background:var(--warn)' : '') + '"></div></div><b class="small">' + L.fmtInt(v) + ' / ' + L.fmtInt(max) + '</b></div>';
+    };
+    var makes = function (p) { return p.make.map(function (m) { return '<div class="pi-row"><span>' + lvBadge(m.level) + ' ' + ico(m.type_id) + esc(m.name) + '</span><b>×' + m.factories + '</b></div>'; }).join(''); };
+    var io = function (p) {
+      return (p.import.length ? '<div class="k">Ввозить в сутки</div>' + p.import.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '') +
+        (p.export.length ? '<div class="k">Вывозить в сутки</div>' + p.export.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '');
+    };
     var n = 0, h = '<section class="panel"><h2>По планетам <span class="muted small">' + lay.count + ' планет · ' + lay.characters + ' перс. (до 6 планет на персонажа)</span></h2>' +
       '<div class="controls" style="flex-wrap:wrap;gap:6px;margin-bottom:6px"><span class="small muted">Сборка P2–P4</span>' +
       '<button type="button" class="in-chip' + (lay.mode === 'factory' ? ' on' : '') + '" data-pi-mode="factory" title="Добывающие только добывают и делают P1, всё остальное — на заводских планетах">на отдельных заводских планетах</button>' +
       '<button type="button" class="in-chip' + (lay.mode === 'local' ? ' on' : '') + '" data-pi-mode="local" title="P2–P4 ставятся прямо на добывающие планеты, где больше всего входов уже есть">без сборочных планет (по возможности)</button></div>' +
-      '<div class="controls" style="flex-wrap:wrap;gap:12px"><label class="small">Добыча с планеты <input type="number" class="pi-num" id="piExtract" min="100" step="500" value="' + esc(Q.extract) + '"> P0/ч</label>' +
-      '<label class="small">Фабрик на заводской планете <input type="number" class="pi-num" id="piPer" min="1" max="40" step="1" value="' + esc(Q.per) + '"></label>' +
-      (lay.mode === 'local' ? '<label class="small">Сборочных фабрик на добывающей <input type="number" class="pi-num" id="piSlots" min="0" max="20" step="1" value="' + esc(Q.slots) + '"></label>' : '') + '</div>' +
+      '<div class="controls" style="flex-wrap:wrap;gap:12px"><label class="small">Командный центр <select id="piCc" aria-label="Уровень командного центра">' +
+      [0, 1, 2, 3, 4, 5].map(function (l) { return '<option value="' + l + '"' + (Q.cc === l ? ' selected' : '') + '>уровень ' + l + '</option>'; }).join('') + '</select></label>' +
+      '<label class="small">Добыча одной головки <input type="number" class="pi-num" id="piHead" min="1" step="50" value="' + esc(Q.head) + '"> P0/ч</label>' +
+      '<label class="small">Запас мощности <input type="number" class="pi-num" id="piMargin" min="0" max="50" step="1" value="' + esc(Q.margin) + '" style="width:64px"> %</label>' +
+      (lay.mode === 'local' ? '<label class="small">Резерв под сборку на добывающей <input type="number" class="pi-num" id="piReserve" min="0" max="20" step="1" value="' + esc(Q.reserve) + '" style="width:64px"> фабр.</label>' : '') + '</div>' +
+      '<p class="small muted" style="margin:6px 0 0">Центр уровня ' + lay.cc + ': энергия <b>' + L.fmtInt(lay.pg) + ' МВт</b>, процессор <b>' + L.fmtInt(lay.cpu) + ' tf</b>' +
+      (lay.pg_max ? ' (с запасом ' + lay.margin + '% под линки — ' + L.fmtInt(lay.pg_max) + ' / ' + L.fmtInt(lay.cpu_max) + ')' : '') + '. Уровень = навык Command Center Upgrades. ' +
+      'На планету ставится, сколько влезет: космопорт, экстракторы (на каждое сырьё свой, до 10 головок), головки, фабрики. ' +
+      'Добыча головки сильно зависит от планеты и длины цикла — впишите свою' + (lay.solo_h ? '; одно сырьё на пустой планете — до ' + L.fmtInt(lay.solo_h) + ' P0/ч' : '') + '.' +
+      (lay.mode === 'local' && lay.reserve !== Q.reserve ? ' Резерв под сборку уменьшен до ' + lay.reserve + ' — больше не влезает без сильного урезания добычи.' : '') + '</p>' +
+      (lay.error ? '<p class="small" style="margin:6px 0 0;color:var(--bad)">' + esc(lay.error) + '</p>' : '') +
       (lay.mode === 'local' && lay.spilled ? '<p class="small" style="margin:6px 0 0;color:var(--warn)">На добывающих не поместилось фабрик: ' + lay.spilled +
-        ' — для них добавлена заводская планета. Увеличьте «Сборочных фабрик на добывающей» или «Добыча с планеты» поменьше (тогда добывающих станет больше).</p>' : '') +
-      (lay.mode === 'local' && !lay.spilled ? '<p class="small" style="margin:6px 0 0;color:var(--good)">Всё собирается на добывающих планетах — отдельные заводы не нужны.</p>' : '') +
-      '<p class="small muted" style="margin:6px 0 0">Добыча зависит от планеты, числа экстракторов и длины цикла — укажите, сколько сырья в час реально даёт ваша планета (6000/ч — это ровно одна базовая фабрика). ' +
-      'Сколько фабрик помещается на заводскую — зависит от уровня командного центра и навыков (обычно 12–20 продвинутых при центре 5 уровня и космопорте).</p><div class="pi-planets">';
+        ' — для них добавлена заводская планета. Поднимите уровень центра или «Резерв под сборку».</p>' : '') +
+      (lay.mode === 'local' && !lay.spilled && !lay.error ? '<p class="small" style="margin:6px 0 0;color:var(--good)">Всё собирается на добывающих планетах — отдельные заводы не нужны.</p>' : '') +
+      '<div class="pi-planets">';
     lay.planets.forEach(function (p) {
       n++;
       var c = p.role === 'extract' ? (PL_COL[p.kind] || 'var(--muted)') : 'var(--accent)';
-      h += '<div class="pi-card" style="--c:' + c + '"><h3>Планета ' + n + ' · ' + (p.role === 'extract' ? 'добыча ' + planet(p.kind) : 'завод' + (p.kind ? ' <span class="pi-pl" style="--c:#b39a7a">Barren</span><span class="pi-pl" style="--c:#5fb85f">Temperate</span>' : ' <span class="small muted">любой тип</span>')) + '</h3>';
+      h += '<div class="pi-card" style="--c:' + c + '"><h3>Планета ' + n + ' · ' + (p.role === 'extract' ? 'добыча ' + planet(p.kind) : 'завод' + (p.kind ? ' <span class="pi-pl" style="--c:#b39a7a">Barren</span><span class="pi-pl" style="--c:#5fb85f">Temperate</span>' : ' <span class="small muted">любой тип</span>')) + '</h3>' +
+        bar(p.pg, lay.pg, 'МВт', 'энергия') + bar(p.cpu, lay.cpu, 'tf', 'процессор') +
+        '<div class="small muted">' + Object.keys(p.structures).map(function (k) { return esc(STRUCT[k] || k) + ' ' + p.structures[k]; }).join(' · ') + '</div>';
       if (p.role === 'extract') {
-        h += '<div class="pi-load" title="загрузка добычи: ' + p.load + '%"><div style="width:' + Math.min(100, p.load) + '%"></div></div>' +
-          '<div class="k">Добывать (экстракторы)</div>' + p.extract.map(function (e) { return row(e, e.per_hour, 'в час'); }).join('') +
-          '<div class="k">Базовые фабрики P0 → P1: ' + p.basic + '</div>' +
-          (p.make.length ? '<div class="k">Сборка здесь же: ' + p.used + ' фабр.</div>' + p.make.map(function (m) { return '<div class="pi-row"><span>' + lvBadge(m.level) + ' ' + ico(m.type_id) + esc(m.name) + '</span><b>×' + m.factories + '</b></div>'; }).join('') : '') +
-          (p.import.length ? '<div class="k">Ввозить в сутки</div>' + p.import.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '') +
-          (p.export.length ? '<div class="k">Вывозить в сутки</div>' + p.export.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '') +
+        h += '<div class="k">Добывать</div>' + p.extract.map(function (e) {
+          return '<div class="pi-row"><span>' + ico(e.type_id) + esc(e.name) + ' <span class="small muted">' + e.ecu + ' ECU · ' + e.heads + ' гол.</span></span><b>' + L.fmtInt(e.per_hour) + ' в час</b></div>';
+        }).join('') +
+          (p.make.length ? '<div class="k">Сборка здесь же: ' + p.used + ' фабр.</div>' + makes(p) : '') + io(p) +
           (p.local_p2.length ? '<div class="small" style="color:var(--good)">Можно делать здесь же P2: ' + esc(p.local_p2.join(', ')) + ' — оба P1 добываются на этой планете.</div>' : '');
       } else {
-        h += '<div class="pi-load" title="фабрик: ' + p.used + ' из ' + lay.per_planet + '"><div style="width:' + Math.min(100, p.used * 100 / lay.per_planet) + '%"></div></div>' +
-          '<div class="k">Фабрики: ' + p.used + ' из ' + lay.per_planet + '</div>' +
-          p.make.map(function (m) { return '<div class="pi-row"><span>' + lvBadge(m.level) + ' ' + ico(m.type_id) + esc(m.name) + '</span><b>×' + m.factories + '</b></div>'; }).join('') +
-          (p.import.length ? '<div class="k">Ввозить в сутки</div>' + p.import.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '') +
-          (p.export.length ? '<div class="k">Вывозить в сутки</div>' + p.export.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '');
+        h += '<div class="k">Фабрики: ' + p.used + '</div>' + makes(p) + io(p);
       }
       h += '</div>';
     });
@@ -196,10 +211,13 @@
     else { Q.lv = b.getAttribute('data-pi-lv'); drawList(); }
   });
   document.addEventListener('change', function (e) {
-    if (e.target && (e.target.id === 'piExtract' || e.target.id === 'piPer' || e.target.id === 'piSlots')) {
-      if (e.target.id === 'piExtract') Q.extract = Math.max(100, +e.target.value || 6000);
-      else if (e.target.id === 'piPer') Q.per = Math.max(1, Math.min(40, Math.round(+e.target.value || 18)));
-      else Q.slots = Math.max(0, Math.min(20, Math.round(+e.target.value || 0)));
+    var pid = e.target && e.target.id;
+    if (pid === 'piCc' || pid === 'piHead' || pid === 'piMargin' || pid === 'piReserve') {
+      var v = +e.target.value;
+      if (pid === 'piCc') Q.cc = Math.max(0, Math.min(5, Math.round(v)));
+      else if (pid === 'piHead') Q.head = Math.max(1, v || 500);
+      else if (pid === 'piMargin') Q.margin = Math.max(0, Math.min(50, v || 0));
+      else Q.reserve = Math.max(0, Math.min(20, Math.round(v || 0)));
       remember(); calc(); return;
     }
     var id = e.target && e.target.getAttribute && e.target.getAttribute('data-pi-qty');

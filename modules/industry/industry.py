@@ -1631,51 +1631,98 @@ def pi_plan(d: dict, items: List[Tuple[int, int]], days: float = 7) -> dict:
 
 PI_BASIC_RATE = 6000                   # одна базовая фабрика перерабатывает 3000 P0 за 30 мин — 6000 в час
 PI_PER_CHAR = 6                        # планет на персонажа (Interplanetary Consolidation V)
+PI_HEADS = 10                          # головок на один экстрактор (ECU); один ECU добывает один вид сырья
+# мощность командного центра по уровню (навык Command Center Upgrades): (энергия МВт, процессор tf)
+PI_CC = {0: (6000, 1675), 1: (9000, 7057), 2: (12000, 12136), 3: (15000, 17215), 4: (17000, 21315), 5: (19000, 25415)}
+# затраты построек (энергия, процессор) — EVE University Wiki
+PI_COST = {"pad": (700, 3600), "ecu": (2600, 400), "head": (550, 110), "basic": (800, 200), 1: (800, 200), 2: (700, 500),
+           3: (700, 500), 4: (400, 1100)}
 
 
-def pi_layout(d: dict, res: dict, extract_h: float = 6000, per_planet: int = 18, mode: str = "factory", local_slots: int = 6) -> dict:
-    """Раскладка по планетам. Добывающие: сырьё P0 (сколько в час) и базовые фабрики P0 → P1 рядом. Сборка P2/P3/P4:
-    mode="factory" — на отдельных заводских планетах (подсказка, где P2 можно делать на месте); mode="local" — по возможности на
-    добывающих: шаг ставится туда, где больше всего его входов уже есть, пока есть свободные места (local_slots на планету;
-    P4 — только Barren/Temperate); что не поместилось — на заводскую. Ввоз и вывоз в сутки по каждой планете.
-    extract_h — сколько P0 в час даёт одна добывающая планета; per_planet — сколько фабрик ставится на заводскую."""
+def pi_layout(d: dict, res: dict, cc: int = 5, head_h: float = 500, margin: float = 10, mode: str = "factory",
+              reserve: int = 4) -> dict:
+    """Раскладка по планетам с учётом мощности командного центра (энергия и процессор) уровня cc.
+    Добывающая планета: космопорт, экстракторы (на каждое сырьё свои, до 10 головок), головки (head_h P0 в час каждая) и
+    базовые фабрики P0 → P1 — пока всё помещается. Сборка P2/P3/P4: mode="factory" — на заводских планетах (космопорт и фабрики,
+    сколько влезет); mode="local" — по возможности на добывающих (там, где больше всего входов, при равенстве — где уже больше
+    сборки), под неё на добывающей оставляется место для reserve фабрик; P4 — только Barren/Temperate; что не влезло — на завод.
+    margin — запас мощности в % (линки между постройками, хранилища)."""
     S, T = d.get("schematics") or {}, d.get("types") or {}
-    extract_h, per_planet = max(float(extract_h or 0), 100.0), max(int(per_planet or 0), 1)
-    local_slots, local = max(int(local_slots or 0), 0), mode == "local"
+    cc = cc if cc in PI_CC else 5
+    head_h, local = max(float(head_h or 0), 1.0), mode == "local"
+    reserve = max(int(reserve or 0), 0) if local else 0
+    k = 1 - min(max(float(margin or 0), 0), 50) / 100
+    pg_max, cpu_max = PI_CC[cc][0] * k, PI_CC[cc][1] * k
     days = res["days"]
     name = lambda t: (T.get(str(t)) or [str(t)])[0]
     p1_of = {ins[0][0]: int(out) for out, (_, _, ins) in S.items() if len(ins) == 1 and (T.get(out) or [0, 0, 1])[2] == 1}
     cover = res["cover"]
-    # добыча: каждому сырью — тип планеты из наименьшего набора; доли планеты раскладываем «первым подходящим» по планетам типа
+
+    def usage(ex: dict, make: Dict[int, int]) -> Tuple[float, float, dict]:
+        """Энергия и процессор планеты: ex — {сырьё: P0 в час}, make — {уровень: фабрик}."""
+        heads = {t: math.ceil(h / head_h - 1e-9) for t, h in ex.items()}
+        n = {"pad": 1, "ecu": sum(math.ceil(x / PI_HEADS) for x in heads.values()), "head": sum(heads.values()),
+             "basic": sum(math.ceil(h / PI_BASIC_RATE - 1e-9) for h in ex.values())}
+        for lv, c in make.items():
+            n[lv] = n.get(lv, 0) + c
+        pg = sum(PI_COST[x][0] * c for x, c in n.items())
+        cpu = sum(PI_COST[x][1] * c for x, c in n.items())
+        return pg, cpu, n
+
+    def fits(ex, make):
+        pg, cpu, _ = usage(ex, make)
+        return pg <= pg_max + 1e-6 and cpu <= cpu_max + 1e-6
+
+    def solo_for(keep):
+        """Самая большая добыча одного сырья на пустой планете — столько можно отдать одному куску."""
+        h = 0.0
+        while fits({0: h + head_h}, keep):
+            h += head_h
+        return h
+
+    # резерв под сборку на добывающей: не больше, чем урезает добычу вдвое (на слабом центре он иначе съедает всё)
+    full = solo_for({})
+    while reserve and solo_for({2: reserve}) < full / 2:
+        reserve -= 1
+    keep = {2: reserve} if reserve else {}
+    solo = solo_for(keep)
+    if solo <= 0:
+        return {"planets": [], "error": "Командный центр этого уровня не тянет даже одну головку с космопортом — поднимите уровень.",
+                "cc": cc, "pg": PI_CC[cc][0], "cpu": PI_CC[cc][1], "count": 0, "characters": 0, "spilled": 0,
+                "mode": "local" if local else "factory", "head_h": head_h, "margin": margin, "reserve": reserve}
     chunks = []
     for r in res["raw"]:
-        kind = next((k for k in cover if k in r["planets"]), (r["planets"] or ["?"])[0])
+        kind = next((x for x in cover if x in r["planets"]), (r["planets"] or ["?"])[0])
         left = r["qty"] / (days * 24)
         while left > 1e-9:
-            part = min(left, extract_h)
+            part = min(left, solo)
             chunks.append((kind, r["type_id"], part))
             left -= part
     planets = []
     for kind, tid, part in sorted(chunks, key=lambda c: (c[0], -c[2])):
-        pl = next((x for x in planets if x["kind"] == kind and x["load"] + part <= extract_h + 1e-6), None)
+        pl = None
+        for x in planets:
+            if x["kind"] == kind:
+                ex = dict(x["ex"])
+                ex[tid] = ex.get(tid, 0) + part
+                if fits(ex, keep):
+                    pl = x
+                    break
         if pl is None:
-            pl = {"role": "extract", "kind": kind, "load": 0.0, "extract": [], "make": [], "used": 0, "free": local_slots}
+            pl = {"role": "extract", "kind": kind, "ex": {}, "make": [], "lv": {}}
             planets.append(pl)
-        pl["load"] += part
-        pl["extract"].append([tid, part])
+        pl["ex"][tid] = pl["ex"].get(tid, 0) + part
     need_p2 = {st["type_id"]: st for st in res["steps"] if st["level"] == 2}
     for pl in planets:
-        ex, p1 = {}, {}
-        for tid, part in pl.pop("extract"):
-            ex[tid] = ex.get(tid, 0) + part
-        pl["extract"] = [{"type_id": t, "name": name(t), "per_hour": round(h), "basic": math.ceil(h / PI_BASIC_RATE - 1e-9)} for t, h in ex.items()]
-        for t, h in ex.items():
+        p1 = {}
+        for t, h in pl["ex"].items():
             if t in p1_of:
                 p1[p1_of[t]] = p1.get(p1_of[t], 0) + h / 150 * 24                  # 3000 P0 → 20 P1, в сутки
         pl["p1"] = p1
+        pl["extract"] = [{"type_id": t, "name": name(t), "per_hour": round(h), "heads": math.ceil(h / head_h - 1e-9),
+                          "ecu": math.ceil(math.ceil(h / head_h - 1e-9) / PI_HEADS), "basic": math.ceil(h / PI_BASIC_RATE - 1e-9)}
+                         for t, h in pl["ex"].items()]
         pl["local_p2"] = [] if local else [name(t) for t, st in need_p2.items() if all(i["type_id"] in p1 for i in st["inputs"])]
-        pl["basic"] = sum(e["basic"] for e in pl["extract"])
-        pl["load"] = round(pl["load"] / extract_h * 100)
 
     def made_here(pl):
         out = dict(pl.get("p1") or {})
@@ -1683,42 +1730,51 @@ def pi_layout(d: dict, res: dict, extract_h: float = 6000, per_planet: int = 18,
             out[m["type_id"]] = out.get(m["type_id"], 0) + m["per_day"]
         return out
 
+    def room(pl, lv):
+        """Сколько ещё фабрик уровня lv влезет на планету."""
+        n = 0
+        while True:
+            lvs = dict(pl["lv"])
+            lvs[lv] = lvs.get(lv, 0) + n + 1
+            if not fits(pl.get("ex") or {}, lvs):
+                return n
+            n += 1
+
     def put(pl, st, n):
         share = n / st["factories"]
-        pl["used"] += n
+        pl["lv"][st["level"]] = pl["lv"].get(st["level"], 0) + n
         pl["make"].append({"type_id": st["type_id"], "name": name(st["type_id"]), "level": st["level"], "factories": n,
                            "factory": st["factory"], "per_day": st["produced"] * share / days,
                            "inputs": [{"type_id": i["type_id"], "name": i["name"], "per_day": i["qty"] * share / days} for i in st["inputs"]]})
 
-    # сборка P2 → P3 → P4: на добывающих (local) или на заводских; большой шаг делим на несколько планет
     factories, spilled = [], 0
     for st in sorted(res["steps"], key=lambda x: (x["level"], x["name"])):
         if st["level"] < 2:
             continue
-        left = st["factories"]
+        lv, left = st["level"], st["factories"]
         while left > 0 and local:
-            ok = [x for x in planets if x["free"] > 0 and (st["level"] < 4 or x["kind"] in ("barren", "temperate"))]
+            ok = [x for x in planets if (lv < 4 or x["kind"] in ("barren", "temperate")) and room(x, lv) > 0]
             if not ok:
                 break
             here = lambda x: sum(1 for i in st["inputs"] if made_here(x).get(i["type_id"], 0) > 0)
-            # где больше входов уже есть; при равенстве — где уже больше сборки (цепочка в одном месте, меньше перевозок)
-            pl = max(ok, key=lambda x: (here(x), len(x["make"]), x["free"]))
-            n = min(left, pl["free"])
-            pl["free"] -= n
+            pl = max(ok, key=lambda x: (here(x), len(x["make"]), room(x, lv)))   # входы на месте; при равенстве — где уже сборка
+            n = min(left, room(pl, lv))
             put(pl, st, n)
             left -= n
         if left and local:
             spilled += left
         while left > 0:
-            need_ht = st["level"] == 4
-            pl = next((x for x in factories if x["used"] < per_planet and (not need_ht or x["kind"] != "any")), None)
+            pl = next((x for x in factories if room(x, lv) > 0), None)
             if pl is None:
-                pl = {"role": "factory", "kind": "", "used": 0, "make": []}
+                pl = {"role": "factory", "kind": "", "ex": {}, "make": [], "lv": {}}
                 factories.append(pl)
-            n = min(left, per_planet - pl["used"])
+                if room(pl, lv) == 0:
+                    return {"planets": [], "error": "На заводской планете с командным центром этого уровня не помещается ни одной фабрики — поднимите уровень.",
+                            "cc": cc, "pg": PI_CC[cc][0], "cpu": PI_CC[cc][1], "count": 0, "characters": 0, "spilled": 0,
+                            "mode": "local" if local else "factory", "head_h": head_h, "margin": margin, "reserve": reserve}
+            n = min(left, room(pl, lv))
             put(pl, st, n)
             left -= n
-    # ввоз и вывоз в сутки: произведено здесь минус потреблено здесь
     for pl in planets + factories:
         made, used = made_here(pl), {}
         for m in pl["make"]:
@@ -1730,12 +1786,17 @@ def pi_layout(d: dict, res: dict, extract_h: float = 6000, per_planet: int = 18,
             m["per_day"] = round(m["per_day"])
             for i in m["inputs"]:
                 i["per_day"] = round(i["per_day"])
+        pg, cpu, n = usage(pl.pop("ex"), pl.pop("lv"))
+        pl["pg"], pl["cpu"], pl["used"] = round(pg), round(cpu), sum(m["factories"] for m in pl["make"])
+        pl["structures"] = {str(x): c for x, c in n.items() if c}
+        pl["basic"] = n.get("basic", 0)
         pl.pop("p1", None)
         if pl["role"] == "factory":
             pl["kind"] = "barren/temperate" if any(m["level"] == 4 for m in pl["make"]) else ""
     out = planets + factories
-    return {"planets": out, "mode": "local" if local else "factory", "extract_h": extract_h, "per_planet": per_planet,
-            "local_slots": local_slots, "spilled": spilled, "count": len(out), "characters": math.ceil(len(out) / PI_PER_CHAR) if out else 0}
+    return {"planets": out, "mode": "local" if local else "factory", "cc": cc, "pg": PI_CC[cc][0], "cpu": PI_CC[cc][1],
+            "pg_max": round(pg_max), "cpu_max": round(cpu_max), "head_h": head_h, "margin": margin, "reserve": reserve,
+            "solo_h": round(solo), "spilled": spilled, "count": len(out), "characters": math.ceil(len(out) / PI_PER_CHAR) if out else 0}
 
 
 def setup(ctx) -> None:
@@ -2091,8 +2152,9 @@ def setup(ctx) -> None:
             days = 7
         res = pi_plan(pid, items, max(1 / 24, min(days, 365)))
         try:
-            res["layout"] = pi_layout(pid, res, float((body or {}).get("extract_h") or 6000), int((body or {}).get("per_planet") or 18),
-                                      "local" if (body or {}).get("mode") == "local" else "factory", int((body or {}).get("local_slots") or 6))
+            b = body or {}
+            res["layout"] = pi_layout(pid, res, int(b.get("cc", 5)), float(b.get("head_h") or 500), float(b.get("margin", 10)),
+                                      "local" if b.get("mode") == "local" else "factory", int(b.get("reserve", 4)))
         except (TypeError, ValueError):
             res["layout"] = pi_layout(pid, res)
         icons([r["type_id"] for r in res["steps"]] + [r["type_id"] for r in res["raw"]])

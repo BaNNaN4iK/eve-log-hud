@@ -607,53 +607,43 @@ class TestPlanetary(unittest.TestCase):
         self.assertEqual(ind.pi_plan(self.D, [(999, 5), (10, 0)])["steps"], [])   # неизвестное и ноль — пропускаем
 
     def test_layout_by_planet(self):
-        r = ind.pi_plan(self.D, [(10, 2)], days=1)
-        lay = ind.pi_layout(self.D, r, extract_h=6000, per_planet=5)
+        r = ind.pi_plan(self.D, [(10, 2)], days=1)                      # сырьё: Aqueous 6000/ч, Noble Gas 4000/ч
+        lay = ind.pi_layout(self.D, r, cc=5, head_h=1000, margin=0)
         ex = [p for p in lay["planets"] if p["role"] == "extract"]
         fa = [p for p in lay["planets"] if p["role"] == "factory"]
-        # сырья 144 000 + 96 000 за сутки = 6000 + 4000 в час: Aqueous — ровно одна планета, Noble Gas — ещё одна (Gas)
-        self.assertEqual([p["kind"] for p in ex], ["gas", "gas"])
-        self.assertEqual(sorted(e["per_hour"] for p in ex for e in p["extract"]), [4000, 6000])
-        self.assertEqual(sum(p["basic"] for p in ex), 2)
-        exports = {e["name"]: e["per_day"] for p in ex for e in p["export"]}
-        self.assertEqual(exports, {"Water": 960, "Oxygen": 640})            # 6000/ч → 40 P1/ч
-        # заводы: фабрики P2 (Glass 1 + Fiber 1) + P3 (1 + 1) + P4 (1) = 5 — одна планета, и она Barren/Temperate (там P4)
+        self.assertEqual(len(ex), 1)                                    # центр 5: оба сырья на одной Gas
+        self.assertEqual(sorted((e["per_hour"], e["heads"], e["ecu"], e["basic"]) for e in ex[0]["extract"]), [(4000, 4, 1, 1), (6000, 6, 1, 1)])
+        self.assertEqual((ex[0]["pg"], ex[0]["cpu"]), (700 + 2 * 2600 + 10 * 550 + 2 * 800, 3600 + 2 * 400 + 10 * 110 + 2 * 200))
+        self.assertEqual({e["name"]: e["per_day"] for e in ex[0]["export"]}, {"Water": 960, "Oxygen": 640})   # 6000/ч → 40 P1/ч
         self.assertEqual(len(fa), 1)
-        self.assertEqual((fa[0]["used"], fa[0]["kind"]), (5, "barren/temperate"))
-        imp = {e["name"]: e["per_day"] for e in fa[0]["import"]}
-        self.assertEqual(imp, {"Water": 960, "Oxygen": 640})                # Glass и Fiber берут Water; Oxygen — только Glass
+        self.assertEqual((fa[0]["kind"], fa[0]["pg"], fa[0]["cpu"]), ("barren/temperate", 700 + 4 * 700 + 400, 3600 + 4 * 500 + 1100))
+        self.assertEqual({e["name"]: e["per_day"] for e in fa[0]["import"]}, {"Water": 960, "Oxygen": 640})
         self.assertEqual({e["name"]: e["per_day"] for e in fa[0]["export"]}, {"Node": 2})   # промежуточное съедено тут же
-        self.assertEqual((lay["count"], lay["characters"]), (3, 1))
-        lay2 = ind.pi_layout(self.D, r, extract_h=2000, per_planet=2)
-        self.assertEqual(sum(1 for p in lay2["planets"] if p["role"] == "extract"), 5)   # 6000 → 3 планеты, 4000 → 2
-        self.assertEqual(sum(1 for p in lay2["planets"] if p["role"] == "factory"), 3)
+        self.assertEqual((lay["count"], lay["characters"], lay["solo_h"]), (2, 1, 18000))
+        weak = ind.pi_layout(self.D, r, cc=1, head_h=1000, margin=0)   # центр 1 (9000 МВт): второе сырьё уже не влезает
+        self.assertEqual([p["role"] for p in weak["planets"]], ["extract", "extract", "factory"])
+        self.assertTrue(all(p["pg"] <= 9000 and p["cpu"] <= 7057 for p in weak["planets"]))
+        self.assertIn("error", ind.pi_layout(self.D, r, cc=0))          # центр 0: процессора нет даже на космопорт
+        margin = ind.pi_layout(self.D, r, cc=5, head_h=1000, margin=10)
+        self.assertTrue(all(p["pg"] <= 19000 * 0.9 for p in margin["planets"]))
 
     def test_layout_without_assembly_planets(self):
         r = ind.pi_plan(self.D, [(10, 2)], days=1)
-        lay = ind.pi_layout(self.D, r, extract_h=6000, per_planet=5, mode="local", local_slots=3)
-        self.assertEqual(lay["mode"], "local")
-        roles = [p["role"] for p in lay["planets"]]
-        # 5 сборочных фабрик, на двух добывающих по 3 места; P4 нельзя на Gas — его фабрика уходит на заводскую Barren/Temperate
-        self.assertEqual((roles.count("extract"), roles.count("factory")), (2, 1))
-        self.assertEqual(lay["spilled"], 1)
-        fa = next(p for p in lay["planets"] if p["role"] == "factory")
-        self.assertEqual([m["name"] for m in fa["make"]], ["Node"])
-        self.assertEqual(fa["kind"], "barren/temperate")
-        # Glass (из Water и Oxygen) встал туда, где оба P1 уже есть или где больше входов — и ввоз сходится с вывозом
-        exp, imp = {}, {}
-        for p in lay["planets"]:
-            for e in p["export"]:
-                exp[e["name"]] = exp.get(e["name"], 0) + e["per_day"]
-            for e in p["import"]:
-                imp[e["name"]] = imp.get(e["name"], 0) + e["per_day"]
-        for k, v in imp.items():
-            self.assertAlmostEqual(exp.get(k, 0) - (2 if k == "Node" else 0), v, delta=1, msg=k)
-        self.assertEqual(exp.get("Node"), 2)
-        full = ind.pi_layout(self.D, r, mode="local", local_slots=10, per_planet=5)
-        self.assertEqual(full["spilled"], 1)                               # P4 на Gas нельзя — всегда завод
+        lay = ind.pi_layout(self.D, r, cc=5, head_h=1000, margin=0, mode="local", reserve=4)
+        self.assertEqual((lay["mode"], lay["reserve"]), ("local", 4))
+        ex, fa = lay["planets"][0], lay["planets"][1]
+        self.assertEqual(sorted(m["name"] for m in ex["make"]), ["Chip", "Fiber", "Glass", "Neo"])   # P2 и P3 — на добывающей
+        self.assertEqual([m["name"] for m in fa["make"]], ["Node"])     # P4 на Gas нельзя — заводская Barren/Temperate
+        self.assertEqual((fa["kind"], lay["spilled"], lay["count"]), ("barren/temperate", 1, 2))
+        self.assertEqual({e["name"]: e["per_day"] for e in ex["export"]}, {"Chip": 12, "Neo": 12})
+        self.assertEqual({e["name"]: e["per_day"] for e in fa["import"]}, {"Chip": 12, "Neo": 12})
+        self.assertLessEqual(ex["pg"], 19000)
         d2 = dict(self.D, planets={"50": ["barren"], "51": ["barren"]})
         r2 = ind.pi_plan(d2, [(10, 2)], days=1)
-        self.assertEqual(ind.pi_layout(d2, r2, mode="local", local_slots=10)["spilled"], 0)   # Barren — всё на месте
+        lay2 = ind.pi_layout(d2, r2, cc=5, head_h=1000, margin=0, mode="local")
+        self.assertEqual((lay2["spilled"], lay2["count"]), (0, 1))     # Barren: и P4 на месте — одна планета
+        weak = ind.pi_layout(self.D, r, cc=1, head_h=1000, margin=0, mode="local", reserve=10)
+        self.assertLess(weak["reserve"], 10)                           # резерв урезан, чтобы не съесть добычу
 
     def test_game_data(self):
         d = ind.load_pi()
