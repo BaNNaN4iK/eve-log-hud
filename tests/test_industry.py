@@ -606,6 +606,28 @@ class TestPlanetary(unittest.TestCase):
         self.assertFalse(r["high_tech"])
         self.assertEqual(ind.pi_plan(self.D, [(999, 5), (10, 0)])["steps"], [])   # неизвестное и ноль — пропускаем
 
+    def test_layout_by_planet(self):
+        r = ind.pi_plan(self.D, [(10, 2)], days=1)
+        lay = ind.pi_layout(self.D, r, extract_h=6000, per_planet=5)
+        ex = [p for p in lay["planets"] if p["role"] == "extract"]
+        fa = [p for p in lay["planets"] if p["role"] == "factory"]
+        # сырья 144 000 + 96 000 за сутки = 6000 + 4000 в час: Aqueous — ровно одна планета, Noble Gas — ещё одна (Gas)
+        self.assertEqual([p["kind"] for p in ex], ["gas", "gas"])
+        self.assertEqual(sorted(e["per_hour"] for p in ex for e in p["extract"]), [4000, 6000])
+        self.assertEqual(sum(p["basic"] for p in ex), 2)
+        exports = {e["name"]: e["per_day"] for p in ex for e in p["export"]}
+        self.assertEqual(exports, {"Water": 960, "Oxygen": 640})            # 6000/ч → 40 P1/ч
+        # заводы: фабрики P2 (Glass 1 + Fiber 1) + P3 (1 + 1) + P4 (1) = 5 — одна планета, и она Barren/Temperate (там P4)
+        self.assertEqual(len(fa), 1)
+        self.assertEqual((fa[0]["used"], fa[0]["kind"]), (5, "barren/temperate"))
+        imp = {e["name"]: e["per_day"] for e in fa[0]["import"]}
+        self.assertEqual(imp, {"Water": 960, "Oxygen": 640})                # Glass и Fiber берут Water; Oxygen — только Glass
+        self.assertEqual({e["name"]: e["per_day"] for e in fa[0]["export"]}, {"Node": 2})   # промежуточное съедено тут же
+        self.assertEqual((lay["count"], lay["characters"]), (3, 1))
+        lay2 = ind.pi_layout(self.D, r, extract_h=2000, per_planet=2)
+        self.assertEqual(sum(1 for p in lay2["planets"] if p["role"] == "extract"), 5)   # 6000 → 3 планеты, 4000 → 2
+        self.assertEqual(sum(1 for p in lay2["planets"] if p["role"] == "factory"), 3)
+
     def test_game_data(self):
         d = ind.load_pi()
         cat = ind.pi_catalog(d)

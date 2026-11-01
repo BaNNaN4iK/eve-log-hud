@@ -1629,6 +1629,88 @@ def pi_plan(d: dict, items: List[Tuple[int, int]], days: float = 7) -> dict:
             "high_tech": any(st["level"] == 4 for st in steps)}
 
 
+PI_BASIC_RATE = 6000                   # одна базовая фабрика перерабатывает 3000 P0 за 30 мин — 6000 в час
+PI_PER_CHAR = 6                        # планет на персонажа (Interplanetary Consolidation V)
+
+
+def pi_layout(d: dict, res: dict, extract_h: float = 6000, per_planet: int = 18) -> dict:
+    """Раскладка по планетам. Добывающие: сырьё P0 (сколько в час) и базовые фабрики P0 → P1 рядом; если на планете есть оба P1
+    какого-то нужного P2 — подсказка делать его на месте. Заводские: фабрики P2/P3/P4 по уровням, ввоз и вывоз в сутки.
+    extract_h — сколько P0 в час даёт одна добывающая планета; per_planet — сколько фабрик ставится на заводскую."""
+    S, T = d.get("schematics") or {}, d.get("types") or {}
+    extract_h, per_planet = max(float(extract_h or 0), 100.0), max(int(per_planet or 0), 1)
+    days = res["days"]
+    name = lambda t: (T.get(str(t)) or [str(t)])[0]
+    p1_of = {ins[0][0]: int(out) for out, (_, _, ins) in S.items() if len(ins) == 1 and (T.get(out) or [0, 0, 1])[2] == 1}
+    cover = res["cover"]
+    # добыча: каждому сырью — тип планеты из наименьшего набора; доли планеты раскладываем «первым подходящим» по планетам типа
+    chunks = []
+    for r in res["raw"]:
+        kind = next((k for k in cover if k in r["planets"]), (r["planets"] or ["?"])[0])
+        left = r["qty"] / (days * 24)
+        while left > 1e-9:
+            part = min(left, extract_h)
+            chunks.append((kind, r["type_id"], part))
+            left -= part
+    planets = []
+    for kind, tid, part in sorted(chunks, key=lambda c: (c[0], -c[2])):
+        pl = next((x for x in planets if x["kind"] == kind and x["load"] + part <= extract_h + 1e-6), None)
+        if pl is None:
+            pl = {"role": "extract", "kind": kind, "load": 0.0, "extract": []}
+            planets.append(pl)
+        pl["load"] += part
+        pl["extract"].append([tid, part])
+    need_p2 = {st["type_id"]: st for st in res["steps"] if st["level"] == 2}
+    for pl in planets:
+        ex, out = {}, {}
+        for tid, part in pl.pop("extract"):
+            ex[tid] = ex.get(tid, 0) + part
+        pl["extract"] = [{"type_id": t, "name": name(t), "per_hour": round(h), "basic": math.ceil(h / PI_BASIC_RATE - 1e-9)} for t, h in ex.items()]
+        for t, h in ex.items():
+            if t in p1_of:
+                out[p1_of[t]] = out.get(p1_of[t], 0) + h / 150                  # 3000 P0 → 20 P1
+        pl["export"] = [{"type_id": t, "name": name(t), "per_day": round(v * 24)} for t, v in out.items()]
+        pl["local_p2"] = [name(t) for t, st in need_p2.items() if all(i["type_id"] in out for i in st["inputs"])]
+        pl["basic"] = sum(e["basic"] for e in pl["extract"])
+        pl["load"] = round(pl["load"] / extract_h * 100)
+    # заводы: фабрики P2 → P3 → P4 по уровням, большой шаг делим на несколько планет; P4 — первая планета Barren/Temperate
+    factories = []
+    for st in sorted(res["steps"], key=lambda x: x["level"]):
+        if st["level"] < 2:
+            continue
+        left = st["factories"]
+        while left > 0:
+            pl = next((x for x in factories if x["used"] < per_planet), None)
+            if pl is None:
+                pl = {"role": "factory", "kind": "", "used": 0, "make": []}
+                factories.append(pl)
+            n = min(left, per_planet - pl["used"])
+            pl["used"] += n
+            share = n / st["factories"]
+            pl["make"].append({"type_id": st["type_id"], "name": name(st["type_id"]), "level": st["level"], "factories": n,
+                               "factory": st["factory"], "per_day": round(st["produced"] * share / days),
+                               "inputs": [{"type_id": i["type_id"], "name": i["name"], "per_day": round(i["qty"] * share / days)} for i in st["inputs"]]})
+            left -= n
+    for pl in factories:
+        made = {m["type_id"] for m in pl["make"]}
+        imp, exp = {}, {}
+        for m in pl["make"]:
+            for i in m["inputs"]:
+                if i["type_id"] not in made:
+                    imp[i["type_id"]] = imp.get(i["type_id"], 0) + i["per_day"]
+            exp[m["type_id"]] = exp.get(m["type_id"], 0) + m["per_day"]
+        for m in pl["make"]:                                                     # что потребляется тут же — не вывозим
+            for i in m["inputs"]:
+                if i["type_id"] in exp:
+                    exp[i["type_id"]] -= i["per_day"]
+        pl["import"] = [{"type_id": t, "name": name(t), "per_day": v} for t, v in imp.items()]
+        pl["export"] = [{"type_id": t, "name": name(t), "per_day": v} for t, v in exp.items() if v > 0]
+        pl["kind"] = "barren/temperate" if any(m["level"] == 4 for m in pl["make"]) else ""
+    out = planets + factories
+    return {"planets": out, "extract_h": extract_h, "per_planet": per_planet, "count": len(out),
+            "characters": math.ceil(len(out) / PI_PER_CHAR) if out else 0}
+
+
 def setup(ctx) -> None:
     data = load_data()
     if not data.get("bp"):
@@ -1981,6 +2063,10 @@ def setup(ctx) -> None:
         except (TypeError, ValueError):
             days = 7
         res = pi_plan(pid, items, max(1 / 24, min(days, 365)))
+        try:
+            res["layout"] = pi_layout(pid, res, float((body or {}).get("extract_h") or 6000), int((body or {}).get("per_planet") or 18))
+        except (TypeError, ValueError):
+            res["layout"] = pi_layout(pid, res)
         icons([r["type_id"] for r in res["steps"]] + [r["type_id"] for r in res["raw"]])
         return {"ok": True, **res}
 

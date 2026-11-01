@@ -7,12 +7,12 @@
   var POST = { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' };
   var LV = { 0: 'P0 сырьё', 1: 'P1', 2: 'P2', 3: 'P3', 4: 'P4' };
   var PL_COL = { barren: '#b39a7a', gas: '#d9c56b', ice: '#9fd4ee', lava: '#e0654a', oceanic: '#4a8fd9', plasma: '#c86ad9', storm: '#7f8fb0', temperate: '#5fb85f' };
-  var Q = { built: false, cat: null, planets: {}, piIds: {}, items: [], days: 7, lv: '', q: '', res: null, busy: false, msg: '' };
+  var Q = { built: false, cat: null, planets: {}, piIds: {}, items: [], days: 7, lv: '', q: '', res: null, busy: false, msg: '', extract: 6000, per: 18 };
   try {
     var sv = JSON.parse(localStorage.getItem('elw.industry.pi') || '{}');
-    Q.items = Array.isArray(sv.items) ? sv.items : []; Q.days = +sv.days || 7;
+    Q.items = Array.isArray(sv.items) ? sv.items : []; Q.days = +sv.days || 7; Q.extract = +sv.extract || 6000; Q.per = +sv.per || 18;
   } catch (e) { }
-  function remember() { try { localStorage.setItem('elw.industry.pi', JSON.stringify({ items: Q.items, days: Q.days })); } catch (e) { } }
+  function remember() { try { localStorage.setItem('elw.industry.pi', JSON.stringify({ items: Q.items, days: Q.days, extract: Q.extract, per: Q.per })); } catch (e) { } }
   function ico(t) { return ELW_INDUSTRY.ico ? ELW_INDUSTRY.ico(t) : ''; }
   function cp(n) { return ELW_INDUSTRY.cp ? ELW_INDUSTRY.cp(n) : esc(n); }
   function vol(v) { return L.fmtInt(Math.round(v)) + ' м³'; }
@@ -36,6 +36,12 @@
     '.pi-t{width:100%;border-collapse:collapse;font-size:13px}.pi-t th{font-size:11.5px;color:var(--muted);font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}' +
     '.pi-t td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:middle}.pi-t .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.pi-t .in-ico{margin-right:6px}' +
     '.pi-m{display:inline-flex;align-items:center;white-space:nowrap;margin:1px 10px 1px 0;font-size:12.5px}.pi-m b{font-weight:600;margin-left:3px}.pi-m .in-ico{width:16px;height:16px;margin-right:3px}' +
+    '.pi-planets{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-top:10px}' +
+    '.pi-card{background:var(--panel2);border:1px solid var(--line);border-top:4px solid var(--c);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:12.5px}' +
+    '.pi-card h3{margin:0;font-size:14px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.pi-card .k{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-top:2px}' +
+    '.pi-row{display:flex;align-items:center;gap:6px;justify-content:space-between}.pi-row .in-ico{width:16px;height:16px;margin-right:4px}.pi-row b{font-variant-numeric:tabular-nums;white-space:nowrap}' +
+    '.pi-load{height:6px;background:var(--panel);border-radius:3px;overflow:hidden}.pi-load>div{height:100%;background:var(--c)}' +
+    '.pi-num{width:90px;box-sizing:border-box;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px;text-align:right;font:inherit}' +
     '@media(max-width:900px){.pi-layout{grid-template-columns:1fr}.pi-side{position:static;max-height:420px}}';
   document.head.appendChild(st);
 
@@ -86,7 +92,7 @@
     clearTimeout(timer);
     if (!Q.items.length) { Q.res = null; drawRes(); return; }
     timer = setTimeout(function () {
-      api('/api/industry/pi/calc', { method: 'POST', headers: POST, body: JSON.stringify({ items: Q.items, days: Q.days }) }).then(function (j) {
+      api('/api/industry/pi/calc', { method: 'POST', headers: POST, body: JSON.stringify({ items: Q.items, days: Q.days, extract_h: Q.extract, per_planet: Q.per }) }).then(function (j) {
         if (j.ok) { Q.res = j; drawRes(); setTimeout(drawRes, 3000); }                       // иконки догружаются
       });
     }, 150);
@@ -103,6 +109,7 @@
       ELW.tile('Типов планет', String(r.cover.length), 'минимум, чтобы добыть всё сырьё') + '</div>' +
       '<h3 class="small muted" style="margin:12px 0 4px">Где добывать — наименьший набор планет:</h3><div class="pi-cover">' + r.cover.map(planet).join('') + '</div>' +
       (r.high_tech ? '<p class="small" style="margin:4px 0 0;color:var(--warn)">P4 строится на High-Tech Production Plant — его можно поставить только на Barren или Temperate.</p>' : '') + '</section>';
+    h += layout(r.layout);
     // сырьё
     h += '<section class="panel"><h2>Сырьё P0 <span class="muted small">добыча экстракторами; «в час» — сколько нужно добывать, чтобы успеть</span></h2><div class="tw"><table class="pi-t"><thead><tr>' +
       '<th class="l">Сырьё</th><th class="r">Нужно</th><th class="r">В час</th><th class="r">Объём</th><th class="l">На каких планетах</th></tr></thead><tbody>' +
@@ -124,6 +131,35 @@
         }).join('') + '</tbody></table></div></section>';
     });
     box.innerHTML = h;
+  }
+  function layout(lay) {
+    if (!lay || !lay.planets.length) return '';
+    var row = function (x, v, unit) { return '<div class="pi-row"><span>' + ico(x.type_id) + esc(x.name) + '</span><b>' + L.fmtInt(v) + ' ' + unit + '</b></div>'; };
+    var n = 0, h = '<section class="panel"><h2>По планетам <span class="muted small">' + lay.count + ' планет · ' + lay.characters + ' перс. (до 6 планет на персонажа)</span></h2>' +
+      '<div class="controls" style="flex-wrap:wrap;gap:12px"><label class="small">Добыча с планеты <input type="number" class="pi-num" id="piExtract" min="100" step="500" value="' + esc(Q.extract) + '"> P0/ч</label>' +
+      '<label class="small">Фабрик на заводской планете <input type="number" class="pi-num" id="piPer" min="1" max="40" step="1" value="' + esc(Q.per) + '"></label></div>' +
+      '<p class="small muted" style="margin:6px 0 0">Добыча зависит от планеты, числа экстракторов и длины цикла — укажите, сколько сырья в час реально даёт ваша планета (6000/ч — это ровно одна базовая фабрика). ' +
+      'Сколько фабрик помещается на заводскую — зависит от уровня командного центра и навыков (обычно 12–20 продвинутых при центре 5 уровня и космопорте).</p><div class="pi-planets">';
+    lay.planets.forEach(function (p) {
+      n++;
+      var c = p.role === 'extract' ? (PL_COL[p.kind] || 'var(--muted)') : 'var(--accent)';
+      h += '<div class="pi-card" style="--c:' + c + '"><h3>Планета ' + n + ' · ' + (p.role === 'extract' ? 'добыча ' + planet(p.kind) : 'завод' + (p.kind ? ' <span class="pi-pl" style="--c:#b39a7a">Barren</span><span class="pi-pl" style="--c:#5fb85f">Temperate</span>' : ' <span class="small muted">любой тип</span>')) + '</h3>';
+      if (p.role === 'extract') {
+        h += '<div class="pi-load" title="загрузка добычи: ' + p.load + '%"><div style="width:' + Math.min(100, p.load) + '%"></div></div>' +
+          '<div class="k">Добывать (экстракторы)</div>' + p.extract.map(function (e) { return row(e, e.per_hour, 'в час'); }).join('') +
+          '<div class="k">Базовые фабрики P0 → P1: ' + p.basic + '</div>' +
+          '<div class="k">Вывозить в сутки</div>' + p.export.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') +
+          (p.local_p2.length ? '<div class="small" style="color:var(--good)">Можно делать здесь же P2: ' + esc(p.local_p2.join(', ')) + ' — оба P1 добываются на этой планете.</div>' : '');
+      } else {
+        h += '<div class="pi-load" title="фабрик: ' + p.used + ' из ' + lay.per_planet + '"><div style="width:' + Math.min(100, p.used * 100 / lay.per_planet) + '%"></div></div>' +
+          '<div class="k">Фабрики: ' + p.used + ' из ' + lay.per_planet + '</div>' +
+          p.make.map(function (m) { return '<div class="pi-row"><span>' + lvBadge(m.level) + ' ' + ico(m.type_id) + esc(m.name) + '</span><b>×' + m.factories + '</b></div>'; }).join('') +
+          (p.import.length ? '<div class="k">Ввозить в сутки</div>' + p.import.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '') +
+          (p.export.length ? '<div class="k">Вывозить в сутки</div>' + p.export.map(function (e) { return row(e, e.per_day, 'шт.'); }).join('') : '');
+      }
+      h += '</div>';
+    });
+    return h + '</div></section>';
   }
   function add(id, qty) {
     var cur = Q.items.filter(function (i) { return i.id === id; })[0];
@@ -150,6 +186,10 @@
     else { Q.lv = b.getAttribute('data-pi-lv'); drawList(); }
   });
   document.addEventListener('change', function (e) {
+    if (e.target && (e.target.id === 'piExtract' || e.target.id === 'piPer')) {
+      if (e.target.id === 'piExtract') Q.extract = Math.max(100, +e.target.value || 6000); else Q.per = Math.max(1, Math.min(40, Math.round(+e.target.value || 18)));
+      remember(); calc(); return;
+    }
     var id = e.target && e.target.getAttribute && e.target.getAttribute('data-pi-qty');
     if (!id) return;
     var q = Math.max(1, Math.round(+e.target.value || 1));
