@@ -158,8 +158,17 @@ class TestRealLines(unittest.TestCase):
                          ("neut_in", 55, "NeutPilot NEUTS (Pioneer)", "Small Energy Neutralizer II"))
         self.assertEqual(P(REAL["neut_in_npc"]).data["source"], "Harvest Sage")
 
+    def test_neut_out(self):
+        # исходящий нейт — своим цветом 0xff7fffff (строка из логов игры)
+        raw = ('[ 2026.11.08 12:30:41 ] (combat) <color=0xff7fffff><b>18 ГДж</b><color=0x77ffffff><font size=10> энергии нейтрализовано </font>'
+               '<b><color=0xffffffff><localized hint="Striking Damavik">Ударный «Домовой»*</b><color=0x77ffffff><font size=10> - '
+               '<localized hint="Small Energy Neutralizer I">Small Energy Neutralizer I*</font>')
+        e = P(raw)
+        self.assertEqual((e.kind, e.data["amount"], e.data["source"], e.data["module"]),
+                         ("neut_out", 18, "Ударный «Домовой»", "Small Energy Neutralizer I"))
+
     def test_neut_unknown_color_is_unparsed(self):
-        # цвет исходящих нейтов неизвестен — не угадываем, строка идёт в «нераспознанные»
+        # другой цвет — не угадываем, строка идёт в «нераспознанные»
         raw = REAL["neut_in_npc"].replace("0xffe57f7f", "0xff7fe57f")
         self.assertEqual(P(raw).kind, "unparsed")
         # строка из ТЗ без цвета — тоже не угадываем
@@ -177,6 +186,18 @@ class TestRealLines(unittest.TestCase):
         e = P(REAL["rep_out_shield"])
         self.assertEqual((e.kind, e.data["amount"], e.data["target"], e.data["module"]),
                          ("rep_out", 95, "FleetMate 3200 (Brutix Navy Issue)", "Small Ancillary Remote Shield Booster"))
+
+    def test_rep_out_armor_and_cap_in(self):
+        e = C("54 единиц запаса прочности брони отремонтировано Damavik [PROB] [SC.ST] [BaNNNaN4iK] - - Small Remote Armor Repairer I")
+        self.assertEqual((e.kind, e.data["amount"], e.data["layer"], e.data["target"], e.data["module"]),
+                         ("rep_out", 54, "броня", "BaNNNaN4iK (Damavik)", "Small Remote Armor Repairer I"))
+        e = C("49 единиц запаса прочности брони отремонтировано Navitas // BaNNaN4iK PROB / - Small Remote Armor Repairer I")
+        self.assertEqual(e.data["target"], "BaNNaN4iK PROB (Navitas)")
+        e = C("0 единиц запаса прочности брони отремонтировано Hobgoblin I [PROB] [SC.ST] [Hobgoblin I] - - Small Remote Armor Repairer I")
+        self.assertEqual((e.kind, e.data["amount"], e.data["target"]), ("rep_out", 0, "Hobgoblin I"))   # дрон: пилот = корабль
+        e = C("17 единиц запаса энергии накопителя получено от Basilisk // Kotofei4 X.I.X / - Large Radiative Scoped Remote Capacitor Transmitter")
+        self.assertEqual((e.kind, e.data["amount"], e.data["source"], e.data["module"]),
+                         ("cap_in", 17, "Kotofei4 X.I.X (Basilisk)", "Large Radiative Scoped Remote Capacitor Transmitter"))
 
     def test_warp(self):
         d = P(REAL["warp_me"]).data
@@ -233,9 +254,9 @@ class TestRealLines(unittest.TestCase):
         self.assertIsNone(elw.parse_line("[ 2026.10.08 17:42:58 ] (None) Пилот X запрашивает связь."))
 
     def test_unknown_combat_is_unparsed(self):
-        e = C("15 единиц запаса прочности брони отремонтировано Кто-то - Small Remote Armor Repairer")
-        self.assertEqual(e.kind, "unparsed")
-        self.assertIn("отремонтировано", e.data["text"])
+        e = C("15 единиц запаса энергии накопителя передано Кто-то - Small Remote Capacitor Transmitter")
+        self.assertEqual(e.kind, "unparsed")                         # такой строки ещё не видели в логах — не угадываем
+        self.assertIn("передано", e.data["text"])
 
 
 if __name__ == "__main__":

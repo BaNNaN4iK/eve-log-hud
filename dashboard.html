@@ -474,7 +474,7 @@ var L = (function () {
       span_out: 0, span_in: 0, dur_combat: 0, dur_mining: 0, dur_bounty: 0,
       ore: {}, ore_crit: {}, ore_residue: {}, ore_cycles: {}, weapons: {}, targets: {}, attackers: {}, in_weapons: {},
       systems: {}, reps_in: {}, reps_out: {}, reps_in_from: {}, reps_out_to: {},
-      neut_in: { gj: 0, n: 0, from: {} }, nos_in: { gj: 0, n: 0, from: {} }, ewar: {}, who: {}, minT0: null, maxT1: null
+      neut_in: { gj: 0, n: 0, from: {} }, nos_in: { gj: 0, n: 0, from: {} }, neut_out: { gj: 0, n: 0, from: {} }, nos_out: { gj: 0, n: 0, from: {} }, cap_in: { gj: 0, n: 0, from: {} }, ewar: {}, who: {}, minT0: null, maxT1: null
     };
     var keys = ['out', 'in', 'refl', 'miss_in', 'miss_out', 'hits_out', 'hits_in', 'bounty', 'bounty_n', 'ore_total', 'residue', 'cycles', 'dur', 'unparsed'];
     list.forEach(function (s) {
@@ -515,7 +515,7 @@ var L = (function () {
         }
       });
       addMap(T.reps_in_from, s.reps_in_from); addMap(T.reps_out_to, s.reps_out_to);
-      ['neut_in', 'nos_in'].forEach(function (nk) {
+      ['neut_in', 'nos_in', 'neut_out', 'nos_out', 'cap_in'].forEach(function (nk) {
         var src = s[nk]; if (!src) return;
         T[nk].gj += src.gj || 0; T[nk].n += src.n || 0; addMap(T[nk].from, src.from);
       });
@@ -1085,6 +1085,19 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
         (T.nos_in.n ? tile('Выпито носферату', L.fmtInt(T.nos_in.gj) + ' ГДж', 'циклов: ' + L.fmtInt(T.nos_in.n), 'in') : '') + '</div>';
       var src = L.entries(L.addMap(L.addMap({}, T.neut_in.from), T.nos_in.from));
       h += '<h3>Источники</h3>' + table('nsrc', src, [{ k: 'name', t: 'Кто', l: 1, f: function (r) { return esc(r.name); } }, { k: 'value', t: 'ГДж', f: function (r) { return L.fmtInt(r.value); } }], { limit: 20 });
+    }
+    if (T.neut_out.n || T.nos_out.n) {                        // исходящие нейты и носы
+      any = true;
+      h += '<div class="tiles">' +
+        (T.neut_out.n ? tile('Нейтрализовано вами', L.fmtInt(T.neut_out.gj) + ' ГДж', 'циклов: ' + L.fmtInt(T.neut_out.n), 'out') : '') +
+        (T.nos_out.n ? tile('Выпито вашими носферату', L.fmtInt(T.nos_out.gj) + ' ГДж', 'циклов: ' + L.fmtInt(T.nos_out.n), 'out') : '') + '</div>';
+      var tgt = L.entries(L.addMap(L.addMap({}, T.neut_out.from), T.nos_out.from));
+      h += '<h3>Цели</h3>' + table('ntgt', tgt, [{ k: 'name', t: 'Кого', l: 1, f: function (r) { return esc(r.name); } }, { k: 'value', t: 'ГДж', f: function (r) { return L.fmtInt(r.value); } }], { limit: 20 });
+    }
+    if (T.cap_in.n) {                                         // энергия накопителя от логистов
+      any = true;
+      h += '<div class="tiles">' + tile('Получено энергии накопителя', L.fmtInt(T.cap_in.gj) + ' ГДж', 'передач: ' + L.fmtInt(T.cap_in.n), 'in') + '</div>' +
+        '<h3>Кто передавал энергию</h3>' + table('capsrc', L.entries(T.cap_in.from), [{ k: 'name', t: 'Кто', l: 1, f: function (r) { return esc(r.name); } }, { k: 'value', t: 'ГДж', f: function (r) { return L.fmtInt(r.value); } }], { limit: 20 });
     }
     var ew = L.entries(T.ewar, 'n');
     if (ew.length) {

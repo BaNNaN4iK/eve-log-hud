@@ -41,7 +41,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Iterable, List, Optional, Tuple
 
-VERSION = "2.5.2"
+VERSION = "2.5.3"
 UPDATE_REPO = "BaNNaN4iK/eve-log-hud"                     # официальный репозиторий для обновлений: «владелец/репозиторий»
 APP_NAME = "EVE Log Watcher"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -365,6 +365,7 @@ QUALITIES = {
 QUALITY_ORDER = ["Царапнул", "Скользнул", "Попал", "Пробил", "Раздробил", "Сокрушил"]   # от слабого к сильному
 
 INCOMING_NEUT_COLOR = "ffe57f7f"   # цвет строки нейта/носа, когда энергию сливают у вас
+OUTGOING_NEUT_COLOR = "ff7fffff"   # цвет строки нейта/носа, когда энергию сливаете вы
 
 NUM = r"-?\d[\d\s]*"
 DMG_HEAD_RE = re.compile(r"^(\d[\d\s]*) (на|из|to|from) (.+)$")
@@ -376,7 +377,9 @@ NEUT_RE = re.compile(r"^(" + NUM + r") ГДж энергии нейтрализ�
 NOS_RE = re.compile(r"^(" + NUM + r") ГДж энергии извлечено и передано (.+)$")
 REP_IN_RE = re.compile(r"^(\d[\d\s]*) единиц запаса прочности (щитов|брони|корпуса) получено "
                        r"(?:накачкой|дистанционным ремонтом) от (.+)$")
-REP_OUT_RE = re.compile(r"^(\d[\d\s]*) единиц запаса прочности (щитов) накачано (.+)$")
+REP_OUT_RE = re.compile(r"^(\d[\d\s]*) единиц запаса прочности (щитов|брони|корпуса) (?:накачано|отремонтировано) (.+)$")
+CAP_IN_RE = re.compile(r"^(\d[\d\s]*) единиц запаса энергии накопителя получено от (.+)$")
+BRACKETS_RE = re.compile(r"^(.+?) \[[^\]]*\] \[[^\]]*\] \[([^\]]+)\]$")
 WARP_RE = re.compile(r"^Попытка (варп-глушения|варп-подавления): источник (.+?), цель (.+)$")
 JAM_IN_RE = re.compile(r"^Вы под действием помех сопровождению целей от (.+)$")
 JAM_OUT_RE = re.compile(r"^Сопровождение целей (.+?) приостановлено(?: - (.+))?$")
@@ -421,8 +424,12 @@ def split_actor(name: str) -> Tuple[str, str, str]:
 
 
 def actor_from_slashes(s: str) -> str:
-    """'Pioneer // NeutPilot NEUTS /' -> 'NeutPilot NEUTS (Pioneer)'."""
+    """'Pioneer // NeutPilot NEUTS /' -> 'NeutPilot NEUTS (Pioneer)'; 'Damavik [PROB] [SC.ST] [Pilot]' -> 'Pilot (Damavik)'."""
     s = s.strip()
+    m = BRACKETS_RE.match(s)                                   # корабль [альянс] [корпорация] [пилот]; у дронов пилот = корабль
+    if m:
+        ship, pilot = m.group(1).strip(), m.group(2).strip()
+        return ship if pilot == ship else f"{pilot} ({ship})"
     if " // " in s:
         ship, rest = s.split(" // ", 1)
         rest = rest.strip().rstrip("/").strip()
@@ -434,7 +441,7 @@ def split_module(s: str) -> Tuple[str, Optional[str]]:
     """'Pioneer // X NEUTS / - Small Energy Neutralizer II' -> (источник, модуль)."""
     if " - " in s:
         a, b = s.rsplit(" - ", 1)
-        return a.strip(), b.strip()
+        return re.sub(r"\s+-$", "", a.strip()), b.strip()                # «Цель - - Модуль» — пустая часть посередине
     return s.strip(), None
 
 
@@ -506,12 +513,17 @@ def parse_combat(text: str, raw: str) -> Optional[Tuple[str, dict]]:
         return ("miss_out", {"weapon": weapon, "target": split_actor(target)[0]})
     m = NEUT_RE.match(text) or NOS_RE.match(text)
     if m:
-        # Известен только цвет входящих нейтов/носов; исходящие не придумываем
-        if first_color(raw) == INCOMING_NEUT_COLOR:
-            src, module = split_module(m.group(2))
-            kind = "neut_in" if "нейтрализовано" in text else "nos_in"
-            return (kind, {"amount": abs(digits(m.group(1))), "source": actor_from_slashes(src), "module": module})
+        # входящие и исходящие различаются только цветом строки; другой цвет — не придумываем
+        color = first_color(raw)
+        if color in (INCOMING_NEUT_COLOR, OUTGOING_NEUT_COLOR):
+            who, module = split_module(m.group(2))
+            kind = ("neut_" if "нейтрализовано" in text else "nos_") + ("in" if color == INCOMING_NEUT_COLOR else "out")
+            return (kind, {"amount": abs(digits(m.group(1))), "source": actor_from_slashes(who), "module": module})
         return None
+    m = CAP_IN_RE.match(text)
+    if m:
+        src, module = split_module(m.group(2))
+        return ("cap_in", {"amount": digits(m.group(1)), "source": actor_from_slashes(src), "module": module})
     m = REP_IN_RE.match(text)
     if m:
         src, module = split_module(m.group(3))
@@ -631,6 +643,7 @@ def new_session(who: str, ts: int) -> dict:
         "weapons": {}, "targets": {}, "attackers": {}, "in_weapons": {},
         "reps_in": {}, "reps_out": {}, "reps_in_from": {}, "reps_out_to": {},
         "neut_in": {"gj": 0, "n": 0, "from": {}}, "nos_in": {"gj": 0, "n": 0, "from": {}},
+        "neut_out": {"gj": 0, "n": 0, "from": {}}, "nos_out": {"gj": 0, "n": 0, "from": {}}, "cap_in": {"gj": 0, "n": 0, "from": {}},
         "ewar": {}, "systems": {},
         "sec_out": {}, "sec_in": {}, "min": {},
         "unparsed": 0, "events": 0,
@@ -736,8 +749,8 @@ def session_add(s: dict, ev: Event, system: Optional[str]) -> None:
         t = s["targets"].setdefault(d["target"], {"dmg": 0, "hits": 0, "miss": 0, "refl": 0, "max": 0,
                                                   "ship": "", "ticker": "", "t0": ts, "t1": ts, "weapons": {}})
         t["miss"] += 1
-    elif k in ("neut_in", "nos_in"):
-        n = s[k]
+    elif k in ("neut_in", "nos_in", "neut_out", "nos_out", "cap_in"):   # from — источник, у исходящих — цель
+        n = s.setdefault(k, {"gj": 0, "n": 0, "from": {}})
         n["gj"] += d["amount"]
         n["n"] += 1
         _inc(n["from"], d["source"], d["amount"])
@@ -893,6 +906,7 @@ def session_finalize(s: dict, min_session_seconds: int) -> dict:
         "reps_in": s["reps_in"], "reps_out": s["reps_out"],
         "reps_in_from": s["reps_in_from"], "reps_out_to": s["reps_out_to"],
         "neut_in": s["neut_in"], "nos_in": s["nos_in"], "ewar": s["ewar"],
+        **{k: s[k] for k in ("neut_out", "nos_out", "cap_in") if s.get(k, {}).get("n")},
         "systems": {k: dict(v, bounty=round2(v["bounty"])) for k, v in s["systems"].items()},
         "avg_dps": round2(s["out"] / out_span) if s["out"] else 0,
         "peak_dps": round2(peak_window(sec_total)) if sec_total else 0,
@@ -1146,6 +1160,7 @@ class Watcher:
             self.names_en = st.get("names_en", {})
             self.unparsed = st.get("unparsed", {})
             self.unparsed_total = st.get("unparsed_total", 0)
+            self._drop_known_unparsed()
             if st.get("logs_dir") and os.path.normcase(st["logs_dir"]) != os.path.normcase(self.logs_dir):
                 log.warning("Папка логов изменилась: %s -> %s", st["logs_dir"], self.logs_dir)
             log.info("state.json загружен: файлов %d, незавершённых сессий %d", len(self.files), len(self.open))
@@ -1305,6 +1320,15 @@ class Watcher:
             h = hints.get(n)
             if h and self.names_en.get(n) != h:
                 self.names_en[n] = h
+
+    def _drop_known_unparsed(self) -> None:
+        """Строки, которые новая версия уже распознаёт, — убрать из «Нераспознанного» (исходящие нейты узнаются по цвету,
+        которого в сохранённом примере нет: раньше нераспознанными оставались только они)."""
+        for key, e in list(self.unparsed.items()):
+            text, typ = e[1], e[2]
+            if typ == "combat" and (parse_combat(text, "") is not None or NEUT_RE.match(text) or NOS_RE.match(text)):
+                self.unparsed_total = max(0, self.unparsed_total - e[0])
+                del self.unparsed[key]
 
     def _remember_unparsed(self, ev: Event) -> None:
         self.unparsed_total += 1
