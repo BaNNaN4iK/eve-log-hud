@@ -30,6 +30,8 @@ SEP = os.pathsep                                   # разделитель --ad
 STDLIB_FOR_MODULES = ["tkinter", "tkinter.ttk", "concurrent.futures", "secrets", "hashlib", "base64", "html", "webbrowser",
                       "shutil", "ctypes.wintypes", "importlib.util", "collections", "urllib.request", "urllib.parse",
                       "urllib.error", "http.client", "socket", "typing", "argparse", "uuid", "zipfile", "csv", "math", "gzip", "calendar"]
+if sys.platform == "win32":
+    STDLIB_FOR_MODULES.append("winsound")             # звук тревоги модуля «Карта»
 
 
 def copy_modules(dst: str) -> list:

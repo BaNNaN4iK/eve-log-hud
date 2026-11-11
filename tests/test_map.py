@@ -61,6 +61,45 @@ class TestMap(unittest.TestCase):
             c.scan(now)
             self.assertEqual([x["systems"] for x in c.recent(now)], [[103], [100], [102]])
 
+    def test_alarm(self):
+        now = 10_000
+        dist = {100: 0, 101: 1, 102: 2, 103: 3}
+        rep = {"ts": now - 10, "systems": [103, 101], "clear": False}
+        self.assertEqual(mp.alarm_hit(rep, dist, 5, now), 1)            # ближайшая из названных систем
+        self.assertIsNone(mp.alarm_hit(rep, dist, 0, now))              # дальше, чем «тревога в пределах»
+        self.assertIsNone(mp.alarm_hit(dict(rep, clear=True), dist, 5, now))
+        self.assertIsNone(mp.alarm_hit(dict(rep, ts=now - 600), dist, 5, now))   # старое сообщение (перечитали лог)
+        self.assertIsNone(mp.alarm_hit({"ts": now, "systems": [999], "clear": False}, dist, 5, now))
+
+    def test_sound_and_hook(self):
+        played = []
+
+        class WS:
+            SND_ALIAS = SND_FILENAME = 1
+            def Beep(self, f, d):
+                played.append(("beep", f))
+            def PlaySound(self, name, flags):
+                played.append(("sound", name))
+        snd = mp.Sound()
+        snd.ws = WS()
+        self.assertTrue(snd.play("beep", now=100))
+        self.assertFalse(snd.play("beep", now=101))                     # не чаще раза в 3 с
+        snd._play("beep", "", True)
+        snd._play("exclamation", "", False)
+        snd._play("wav", "C:/нет/такого.wav", False)                    # файла нет — системный звук не играем, будет сигнал
+        self.assertIn(("beep", 1200), played)                           # рядом — выше
+        self.assertIn(("sound", "SystemExclamation"), played)
+        u = mp.Universe(MINI)
+        with tempfile.TemporaryDirectory() as d:
+            now = time.time()
+            stamp = time.strftime("%Y.%m.%d %H:%M:%S", time.gmtime(now - 5))
+            chat_file(os.path.join(d, "Intel_1.txt"), "Intel", "Pilot A", [f"[ {stamp} ] Scout > 1DQ1-A Enemy"])
+            c = mp.Chat(u, d, ["Intel"])
+            got = []
+            c.on_report = lambda rep, t: got.append(rep["systems"])
+            c.scan(now)
+            self.assertEqual(got, [[103]])
+
     def test_chat_dir(self):
         self.assertEqual(mp.chat_dir_for(os.path.join("C:", "EVE", "logs", "Gamelogs")), os.path.join("C:", "EVE", "logs", "Chatlogs"))
         self.assertEqual(mp.chat_dir_for(""), "")

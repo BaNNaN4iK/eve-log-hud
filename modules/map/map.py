@@ -22,6 +22,10 @@ ACTIVITY_TTL = 3600                    # ESI обновляет прыжки и 
 SOV_TTL = 6 * 3600
 SCAN_EVERY = 2                         # как часто читать логи чата, с
 FILE_AGE = 24 * 3600                   # файлы чата старше суток не читаем
+ALARM_FRESH = 180                      # тревога — только по свежим сообщениям (не при перечитывании старого лога)
+ALARM_GAP = 3                          # не чаще раза в 3 с
+SOUNDS = {"beep": "два сигнала", "exclamation": "Windows: восклицание", "hand": "Windows: критическая ошибка",
+          "asterisk": "Windows: звёздочка", "wav": "свой файл .wav"}
 LINE_RE = re.compile(r"^﻿?\[ (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2}) \] (.+?) > (.*)$")
 LOCAL_RE = re.compile(r"(?:Канал изменен на Локальный|Channel changed to Local)\s*:\s*(.+?)\*?\s*$")
 SYSTEM_SENDERS = {"Система EVE", "EVE System"}
@@ -134,6 +138,7 @@ class Chat:
         self.channels: Dict[str, int] = {}                      # канал → время последнего файла
         self.lock = threading.Lock()
         self.version = 0
+        self.on_report = None                                    # новое сообщение разведки → fn(report) (тревога)
 
     def set_intel(self, names: List[str]) -> None:
         with self.lock:
@@ -222,9 +227,12 @@ class Chat:
             if local or now - ts > INTEL_KEEP:
                 continue
             systems, clear = self.uni.systems_in(msg)
+            rep = {"ts": ts, "channel": f["channel"], "who": who, "text": msg[:400], "systems": systems, "clear": clear}
             with self.lock:
-                self.reports.append({"ts": ts, "channel": f["channel"], "who": who, "text": msg[:400], "systems": systems, "clear": clear})
+                self.reports.append(rep)
                 self.version += 1
+            if self.on_report and f["channel"] in self.intel:
+                self.on_report(rep, now)
 
     def recent(self, now: Optional[float] = None) -> List[dict]:
         now = time.time() if now is None else now
@@ -288,6 +296,54 @@ class Activity:
             self.busy = False
 
 
+class Sound:
+    """Звук тревоги из самого трекера (Windows, winsound): звучит, даже если окно программы закрыто."""
+
+    def __init__(self):
+        try:
+            import winsound
+            self.ws = winsound
+        except ImportError:                                      # не Windows — звука нет, страница скажет
+            self.ws = None
+        self.last = 0.0
+
+    def play(self, kind: str = "beep", path: str = "", urgent: bool = False, now: Optional[float] = None) -> bool:
+        now = time.time() if now is None else now
+        if self.ws is None or now - self.last < ALARM_GAP:
+            return False
+        self.last = now
+        threading.Thread(target=self._play, args=(kind, path, urgent), name="map-sound", daemon=True).start()
+        return True
+
+    def _play(self, kind: str, path: str, urgent: bool) -> None:
+        ws = self.ws
+        try:
+            alias = {"exclamation": "SystemExclamation", "hand": "SystemHand", "asterisk": "SystemAsterisk"}.get(kind)
+            if kind == "wav" and path and os.path.isfile(path):
+                ws.PlaySound(path, ws.SND_FILENAME)
+                if urgent:
+                    ws.PlaySound(path, ws.SND_FILENAME)
+            elif alias:
+                ws.PlaySound(alias, ws.SND_ALIAS)
+                if urgent:
+                    time.sleep(0.15)
+                    ws.PlaySound(alias, ws.SND_ALIAS)
+            else:                                                # два сигнала; враг совсем рядом — четыре, выше
+                for _ in range(4 if urgent else 2):
+                    ws.Beep(1200 if urgent else 880, 140)
+                    time.sleep(0.06)
+        except (RuntimeError, OSError):
+            pass
+
+
+def alarm_hit(rep: dict, dist: Dict[int, int], rng: int, now: float) -> Optional[int]:
+    """Тревога по сообщению разведки: свежее, не «чисто», система в пределах rng прыжков → сколько прыжков, иначе None."""
+    if rep["clear"] or now - rep["ts"] > ALARM_FRESH:
+        return None
+    near = [dist[s] for s in rep["systems"] if s in dist]
+    return min(near) if near and min(near) <= rng else None
+
+
 def chat_dir_for(logs_dir: str) -> str:
     """Логи чата лежат рядом с боевыми: …/logs/Gamelogs → …/logs/Chatlogs."""
     return os.path.join(os.path.dirname(os.path.normpath(logs_dir or "")), "Chatlogs") if logs_dir else ""
@@ -301,9 +357,23 @@ def setup(ctx) -> None:
             settings = json.load(f)
     except (OSError, ValueError):
         settings = {}
-    settings = {"intel": list(settings.get("intel") or []), "range": int(settings.get("range") or 5), "sound": settings.get("sound", True) is not False}
+    settings = {"intel": list(settings.get("intel") or []), "range": int(settings.get("range") or 5), "sound": settings.get("sound", True) is not False,
+                "sound_kind": settings.get("sound_kind") if settings.get("sound_kind") in SOUNDS else "beep",
+                "sound_file": str(settings.get("sound_file") or "")}
+    sound = Sound()
     chat = Chat(uni, chat_dir_for(getattr(ctx.watcher, "logs_dir", "")), settings["intel"])
     act = Activity(ctx.online.esi if ctx.online is not None else None)
+
+    def on_report(rep, now):                                     # тревога — из трекера, окно может быть закрыто
+        if not settings["sound"]:
+            return
+        cs = chars()
+        if not cs:
+            return
+        j = alarm_hit(rep, uni.jumps([c["system"] for c in cs], settings["range"]), settings["range"], now)
+        if j is not None:
+            sound.play(settings["sound_kind"], settings["sound_file"], urgent=j <= 1, now=now)
+    chat.on_report = on_report
 
     def loop():
         while not ctx.stop.wait(SCAN_EVERY):
@@ -338,6 +408,7 @@ def setup(ctx) -> None:
         chans = sorted(({"name": k, "at": v, "intel": k in chat.intel} for k, v in chat.channels.items()
                         if k not in ("Локальный", "Local")), key=lambda c: (not c["intel"], -c["at"]))
         return {"ok": True, "chars": cs, "intel": reps[-300:], "version": chat.version, "channels": chans, "settings": settings,
+                "sounds": SOUNDS, "sound_ok": sound.ws is not None,
                 "activity": {str(k): v for k, v in act.data.items()}, "activity_at": act.at or None, "activity_error": act.error,
                 "sov": {str(k): v for k, v in act.sov.items()}, "sov_names": {str(k): v for k, v in act.names.items()},
                 "incursions": act.incursions, "online": ctx.online is not None, "chat_dir": chat.dir,
@@ -355,9 +426,23 @@ def setup(ctx) -> None:
                 pass
         if "sound" in b:
             settings["sound"] = bool(b["sound"])
+        if b.get("sound_kind") in SOUNDS:
+            settings["sound_kind"] = b["sound_kind"]
+        if isinstance(b.get("sound_file"), str):
+            settings["sound_file"] = b["sound_file"].strip().strip('"')[:400]
         ctx.core.atomic_write_json(path, settings)
         return {"ok": True, "settings": settings}
 
     ctx.get("/api/map/data", static)
     ctx.get("/api/map/state", state)
+    def test_sound(body=None, qs=None):
+        if sound.ws is None:
+            return {"ok": False, "message": "Звук тревоги работает только в Windows."}
+        if settings["sound_kind"] == "wav" and not os.path.isfile(settings["sound_file"]):
+            return {"ok": False, "message": "Файл не найден: " + (settings["sound_file"] or "не указан") + " — играю два сигнала."} if sound.play("beep", now=time.time() + ALARM_GAP) else {"ok": False}
+        sound.last = 0
+        sound.play(settings["sound_kind"], settings["sound_file"], urgent=bool((body or {}).get("urgent")))
+        return {"ok": True}
+
     ctx.post("/api/map/settings", save)
+    ctx.post("/api/map/sound/test", test_sound)

@@ -6,7 +6,7 @@
   var POST = { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' };
   var OVERLAYS = [['', 'без активности'], ['jumps', 'прыжки за час'], ['npc', 'убито NPC за час'], ['ships', 'убито кораблей за час'],
     ['pods', 'убито капсул за час'], ['sov', 'суверенитет']];
-  var M = { d: null, loading: false, st: null, stAt: 0, region: null, follow: true, overlay: '', sel: null, key: null, view: null, heard: {}, ready: false };
+  var M = { d: null, loading: false, st: null, stAt: 0, region: null, follow: true, overlay: '', sel: null, key: null, view: null, ready: false };
   try {
     var sv = JSON.parse(localStorage.getItem('elw.map') || '{}');
     M.region = sv.region || null; M.follow = sv.follow !== false; M.overlay = sv.overlay || '';
@@ -60,9 +60,7 @@
     M.stAt = Date.now();
     api('/api/map/state').then(function (j) {
       if (!j.ok) return;
-      var first = !M.st;
       M.st = j;
-      alarm(j, first);
       if (M.follow && j.chars.length && M.d) {
         var me = M.d.sys[j.chars[0].system];
         if (me && String(me.r) !== String(M.region)) { M.region = me.r; remember(); M.view = null; }
@@ -70,30 +68,6 @@
       draw();
     });
   }
-  // ----- тревога: новое сообщение разведки в пределах N прыжков -----
-  var actx = null;
-  function beep() {
-    try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      [0, 0.18].forEach(function (t) {
-        var o = actx.createOscillator(), g = actx.createGain();
-        o.frequency.value = 880; o.connect(g); g.connect(actx.destination);
-        g.gain.setValueAtTime(0.12, actx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + t + 0.15);
-        o.start(actx.currentTime + t); o.stop(actx.currentTime + t + 0.16);
-      });
-    } catch (e) { }
-  }
-  function alarm(j, first) {
-    var range = j.settings.range, now = Date.now() / 1000, hit = false;
-    j.intel.forEach(function (r) {
-      var k = r.ts + '|' + r.who + '|' + r.text;
-      if (M.heard[k]) return;
-      M.heard[k] = true;
-      if (!first && !r.clear && r.jumps !== null && r.jumps <= range && now - r.ts < 180) hit = true;
-    });
-    if (hit && j.settings.sound) beep();
-  }
-
   // ----- отрисовка -----
   function secColor(s) {
     if (s >= 0.95) return '#2c75e1'; if (s >= 0.75) return '#399aeb'; if (s >= 0.65) return '#4ecef8'; if (s >= 0.55) return '#60daa6';
@@ -296,7 +270,13 @@
       return '<label class="mp-chan"><input type="checkbox" data-mp-chan="' + esc(c.name) + '"' + (c.intel ? ' checked' : '') + '> ' + esc(c.name) + ' <span class="muted small">' + ago(c.at) + '</span></label>';
     }).join('') : '<div class="muted small">Каналы появятся, когда игра запишет логи чата (настройка игры «Вести журнал чата» включена по умолчанию).</div>') + '</div>' +
       '<div class="mp-bar" style="margin:8px 0 0"><label class="small">Тревога в пределах <input type="number" id="mpRange" min="0" max="30" value="' + range + '" style="width:60px"> прыжк.</label>' +
-      '<label class="small"><input type="checkbox" id="mpSound"' + (st.settings.sound ? ' checked' : '') + '> звук</label></div></section>';
+      '<label class="small"><input type="checkbox" id="mpSound"' + (st.settings.sound ? ' checked' : '') + '> звук</label></div>' +
+      '<div class="mp-bar" style="margin:6px 0 0"><select id="mpSoundKind" aria-label="Какой звук">' + Object.keys(st.sounds || {}).map(function (k) {
+        return '<option value="' + k + '"' + (st.settings.sound_kind === k ? ' selected' : '') + '>' + esc(st.sounds[k]) + '</option>'; }).join('') + '</select>' +
+      '<button type="button" class="btn" id="mpSoundTest" style="padding:3px 10px">Проверить</button></div>' +
+      (st.settings.sound_kind === 'wav' ? '<div class="mp-bar" style="margin:6px 0 0"><input id="mpSoundFile" placeholder="C:\\путь\\к\\звуку.wav" value="' + esc(st.settings.sound_file) + '" style="flex:1;min-width:0" aria-label="Путь к файлу .wav"></div>' : '') +
+      '<div class="small muted" style="margin-top:4px">' + (st.sound_ok ? 'Звучит из самой программы — даже когда окно закрыто (программа в трее). Враг в вашей или соседней системе — сигнал чаще.' :
+        'Звук тревоги работает только в Windows.') + ' <span id="mpSoundMsg" role="status"></span></div></section>';
     $('mpSide').innerHTML = chars + intel + chans;
   }
 
@@ -346,6 +326,9 @@
     if (g) { goSystem(+g.getAttribute('data-mp-go')); return; }
     if (e.target.closest('[data-mp-close]')) { M.sel = null; M.key = null; draw(); return; }
     if (e.target.id === 'mpFit') { M.view = null; M.key = null; draw(); }
+    if (e.target.id === 'mpSoundTest') {
+      api('/api/map/sound/test', { method: 'POST', headers: POST, body: '{}' }).then(function (j) { var m = $('mpSoundMsg'); if (m) m.textContent = j.message || (j.ok ? 'играю…' : ''); });
+    }
   });
   document.addEventListener('change', function (e) {
     var t = e.target;
@@ -354,7 +337,9 @@
     else if (t.id === 'mpOverlay') { M.overlay = t.value; remember(); M.key = null; draw(); }
     else if (t.id === 'mpFollow') { M.follow = t.checked; remember(); M.view = null; loadState(true); }
     else if (t.id === 'mpRange') saveSettings({ range: +t.value });
-    else if (t.id === 'mpSound') { saveSettings({ sound: t.checked }); if (t.checked) beep(); }
+    else if (t.id === 'mpSound') saveSettings({ sound: t.checked });
+    else if (t.id === 'mpSoundKind') saveSettings({ sound_kind: t.value });
+    else if (t.id === 'mpSoundFile') saveSettings({ sound_file: t.value });
     else if (t.hasAttribute('data-mp-chan')) {
       var on = [].slice.call(document.querySelectorAll('[data-mp-chan]')).filter(function (x) { return x.checked; }).map(function (x) { return x.getAttribute('data-mp-chan'); });
       saveSettings({ intel: on });
