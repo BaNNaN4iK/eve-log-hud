@@ -56,6 +56,7 @@
       '.rf-fst{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 8px;font-size:12px}.rf-fst b{display:block;font-size:14px;font-variant-numeric:tabular-nums}.rf-fst span{color:var(--muted)}' +
       '.rf-plan{color:var(--accent);text-decoration:none;font-weight:600}.rf-plan:hover{text-decoration:underline}' +
       '.rf-vs{font-size:12px}.rf-vs b{font-weight:600}.rf-pir{color:#e3a63e;border-color:#e3a63e}' +
+      '.rf-copy{cursor:copy;border-bottom:1px dashed var(--muted)}.rf-copy:hover,.rf-copy:focus{color:var(--accent);outline:none}.rf-copy.done{color:var(--good);border-bottom-color:var(--good)}.rf-copy.done::after{content:" ✓ скопировано";font-size:11px}' +
       '@media(max-width:900px){.rf-layout{grid-template-columns:1fr}.rf-side{position:static;max-height:420px}}' +
       '@media(max-width:760px){.rf-t .hide-m{display:none}}',
     html: '<div class="rf-views" role="tablist" aria-label="Разделы справочника" id="rfSections"></div><div id="rfBody"></div>',
@@ -167,6 +168,21 @@
     if (focus) { var qi = $('rfQ'); qi.focus(); qi.setSelectionRange(pos, pos); }
   }
 
+  // текст, который копируется по нажатию (название навыка — вставить в поиск навыков в игре)
+  function copyable(t) { return t ? '<span class="rf-copy" data-rf-copy="' + esc(t) + '" tabindex="0" role="button" title="Нажмите — скопировать">' + esc(t) + '</span>' : '—'; }
+  function copyText(text) {
+    var ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) { }
+    document.body.removeChild(ta);
+    if (!ok && navigator.clipboard) navigator.clipboard.writeText(text).catch(function () { });
+  }
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest && e.target.closest('[data-rf-copy]');
+    if (!el) return;
+    copyText(el.getAttribute('data-rf-copy'));
+    el.classList.add('done'); setTimeout(function () { el.classList.remove('done'); }, 1500);
+  });
+  document.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-rf-copy]')) { e.preventDefault(); e.target.click(); } });
   function oreViews() {
     return '<div class="rf-bar" style="margin:0 0 10px">' + chip('data-rf-oview', 'ores', 'Руда', R.oreView !== 'crystals') +
       chip('data-rf-oview', 'crystals', 'Кристаллы для добычи', R.oreView === 'crystals', 'Какой кристалл на какую руду и чем отличаются типы A, B и C') + '</div>';
@@ -214,7 +230,7 @@
           f.crystals.map(function (k) { return k.type + (k.tech === 2 ? ' II' : ' I'); }).join(', ') + '</div></td>' +
           '<td class="l" style="white-space:normal">' + esc(f.ores.join(', ')) + (f.special.length ? '<div class="rf-sub">и особые: ' + esc(f.special.join(', ')) + '</div>' : '') +
           (f.note ? '<div class="rf-sub">' + esc(f.note) + '</div>' : '') + '</td>' +
-          '<td class="l">' + esc(f.skill) + '</td><td class="r">' + pc(Math.min.apply(null, v)) + '–' + pc(Math.max.apply(null, v)) + '%</td></tr>';
+          '<td class="l">' + copyable(f.skill) + '<div class="rf-sub">T1 — уровень 3, T2 — уровень 4</div></td><td class="r">' + pc(Math.min.apply(null, v)) + '–' + pc(Math.max.apply(null, v)) + '%</td></tr>';
       }).join('') + '</tbody></table></div>' +
       '<p class="small muted" style="margin:8px 0 0">Кристаллов нет для Mercoxit и особых руд заданий и событий — их добывают без кристалла. ' +
       'Варианты руды (II-, III-, IV-Grade, Brimful, Glistening…) добываются тем же кристаллом, что и базовая руда. Данные — справочник игры и ESI' + (c.built ? ', ' + esc(c.built) : '') + '.</p></section>';
