@@ -1,7 +1,7 @@
 {
   "id": "reference",
   "name": "Справочник",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "entry": "reference.py",
   "web": [
     "tab.js"

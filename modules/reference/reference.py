@@ -194,6 +194,87 @@ def ore_table(data: dict, prices: Optional[Dict[int, float]] = None) -> dict:
 # ---------------------------------------------------------------------------
 # Чертежи: что производит и как получить
 # ---------------------------------------------------------------------------
+# Кристаллы для добычи: какой кристалл на какую руду, сравнение типов A / B / C (reference_crystals.json)
+# ---------------------------------------------------------------------------
+
+CRYSTAL_FAMILIES = [                     # порядок и подписи семейств кристаллов
+    ("Simple Asteroid", "Простая руда", "Veldspar, Scordite, Pyroxeres, Plagioclase и Mordunium — хай-сек"),
+    ("Coherent Asteroid", "Связная руда", "Omber, Kernite, Jaspet, Hemorphite, Hedbergite и новые руды того же уровня"),
+    ("Variegated Asteroid", "Пёстрая руда", "Gneiss, Dark Ochre, Crokite, Kylixium — лоу и нули"),
+    ("Complex Asteroid", "Сложная руда", "Bistot, Arkonor, Spodumain и руды нулей того же уровня"),
+    ("Abyssal Asteroid", "Руда Бездны", "Bezdnacine, Rakovene, Talassonite — Почвен и Бездна"),
+    ("Erratic Ore", "Нестабильная руда", "Prismaticite"),
+    ("Ubiquitous Moon", "Лунная R4", "повсеместная лунная руда"),
+    ("Common Moon", "Лунная R8", "обычная лунная руда"),
+    ("Uncommon Moon", "Лунная R16", "необычная лунная руда"),
+    ("Rare Moon", "Лунная R32", "редкая лунная руда"),
+    ("Exceptional Moon", "Лунная R64", "исключительная лунная руда"),
+]
+CRYSTAL_TYPES = {
+    "A": ("Основной", "сбалансированный: прибавка к выходу без лишних отходов (у II — чуть больше отходов). Обычный выбор для добычи."),
+    "B": ("Быстрый", "тот же выход за цикл, но цикл короче — больше руды в час; платите отходами и расходом накопителя."),
+    "C": ("Выжигание", "выход в 4–5 раз меньше обычного, отходов очень много — руда уничтожается. Чтобы очистить поясы "
+                       "(например, на чужой территории), а не для заработка."),
+}
+
+
+SPECIAL_ORE = re.compile(r"^Flawed |.* [XZ]-Grade$")
+
+
+def load_crystals(path: Optional[str] = None) -> dict:
+    try:
+        with open(path or os.path.join(HERE, "reference_crystals.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"crystals": [], "ores": {}}
+
+
+def crystal_of(d: dict) -> Dict[int, str]:
+    """Руда → семейство кристалла."""
+    out = {}
+    for c in d.get("crystals") or []:
+        for o in c["ores"]:
+            out[o] = c["family"]
+    return out
+
+
+def crystal_table(d: dict) -> dict:
+    """Семейства (какая руда) и сравнение типов: выход за цикл, цикл, выход в час, отходы, накопитель, износ."""
+    ores = d.get("ores") or {}
+    by = {}
+    for c in d.get("crystals") or []:
+        by.setdefault(c["family"], []).append(c)
+    fams = []
+    for key, ru, note in CRYSTAL_FAMILIES + [(k, k, "") for k in sorted(by) if k not in {f[0] for f in CRYSTAL_FAMILIES}]:
+        cs = by.get(key)
+        if not cs:
+            continue
+        bases, special = [], []
+        for o in cs[0]["ores"]:
+            base = split_name(ores[str(o)][0])[0]
+            lst = special if SPECIAL_ORE.match(base) else bases       # особые руды заданий и событий — отдельно
+            if base not in lst:
+                lst.append(base)
+        cs = sorted(cs, key=lambda c: (c["type"], c["tech"]))
+        fams.append({"family": key, "ru": ru, "note": note, "ores": bases, "special": special,
+                     "skill": cs[0].get("skill_name", ""), "crystals": [{
+                         "id": c["id"], "name": c["name"], "type": c["type"], "tech": c["tech"], "skill_level": c["skill_level"],
+                         "volatility": c["volatility"]} for c in cs]})
+    acc = {}
+    for c in d.get("crystals") or []:                        # сравнение типов: по всем семействам, что различается — диапазоном
+        a = acc.setdefault((c["type"], c["tech"]), {})
+        c = dict(c, per_hour=round(c["yield"] / c["duration"], 3) if c["duration"] else c["yield"])
+        for f in ("yield", "duration", "per_hour", "residue_chance", "residue_volume", "cap", "volatility", "volatility_damage", "skill_level"):
+            a.setdefault(f, []).append(c[f])
+    cmp = []
+    for (t, tech), a in sorted(acc.items()):
+        x = {"type": t, "tech": tech}
+        for f, v in a.items():
+            x[f] = [min(v), max(v)]
+        x["label"], x["about"] = CRYSTAL_TYPES.get(t, ("", ""))
+        cmp.append(x)
+    return {"families": fams, "compare": cmp, "built": d.get("built")}
+
 
 def load_bp(path: Optional[str] = None) -> dict:
     try:
@@ -408,12 +489,22 @@ def setup(ctx) -> None:
     prices = Prices(ctx.online.esi if ctx.online is not None else None, os.path.join(ctx.data_dir, "reference_prices.json"))
     icons_done = {"v": False}
 
+    crd = load_crystals()
+    cof = crystal_of(crd)
+
+    def crystals(qs):
+        return {"ok": True, **crystal_table(crd)}
+
     def ores(qs):
         res = ore_table(data, prices.get(want))
         if ctx.online is not None and not icons_done["v"]:
             icons_done["v"] = True
             ids = [r["type_id"] for r in res["ores"]] + [v["type_id"] for r in res["ores"] for v in r["variants"]] + sorted(want)
             threading.Thread(target=lambda: [ctx.online.fetch_icon(i) for i in ids], name="reference-icons", daemon=True).start()
+        labels = {k: ru for k, ru, _ in CRYSTAL_FAMILIES}
+        for r in res["ores"]:                                     # каким кристаллом добывать
+            fam = next((cof[t] for t in [r["type_id"]] + [v["type_id"] for v in r["variants"]] if t in cof), None)
+            r["crystal"] = labels.get(fam, fam) if fam else ""
         return {"ok": True, **res, "prices_at": prices.at or None, "online": ctx.online is not None, "built": data.get("built")}
 
     bpd = load_bp()
@@ -453,6 +544,7 @@ def setup(ctx) -> None:
         return {"ok": True, **r, "prices_at": prices.at or None}
 
     ctx.get("/api/reference/ores", ores)
+    ctx.get("/api/reference/crystals", crystals)
     ctx.get("/api/reference/fw", fw)
     ctx.get("/api/reference/fw/store", fw_shop)
     ctx.get("/api/reference/blueprints", bp_cat)

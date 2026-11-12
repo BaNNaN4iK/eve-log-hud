@@ -74,6 +74,29 @@ class TestBlueprints(unittest.TestCase):
         self.assertIsNone(ref.bp_detail(d, "0"))
 
 
+class TestCrystals(unittest.TestCase):
+    def test_from_game_data(self):
+        d = ref.load_crystals()
+        t = ref.crystal_table(d)
+        fams = {f["family"]: f for f in t["families"]}
+        self.assertEqual(fams["Simple Asteroid"]["ores"], ["Mordunium", "Plagioclase", "Pyroxeres", "Scordite", "Veldspar"])
+        self.assertIn("Flawed Kangite", fams["Simple Asteroid"]["special"])      # особые руды — отдельно
+        self.assertIn("Prismaticite", fams["Erratic Ore"]["ores"])
+        self.assertEqual(len(fams["Rare Moon"]["crystals"]), 6)                  # A, B, C × I, II
+        cmp = {(c["type"], c["tech"]): c for c in t["compare"]}
+        self.assertEqual(cmp[("A", 1)]["yield"], [1.5, 1.5])
+        self.assertEqual(cmp[("B", 2)]["per_hour"], [2.25, 2.25])               # 1,8 за цикл, цикл ×0,8
+        self.assertEqual(cmp[("C", 1)]["yield"], [0.25, 0.25])                  # выжигание
+        self.assertGreater(cmp[("C", 2)]["residue_chance"][0], cmp[("A", 2)]["residue_chance"][0])
+        cof = ref.crystal_of(d)
+        veld = next(int(k) for k, v in d["ores"].items() if v[0] == "Veldspar")
+        self.assertEqual(cof[veld], "Simple Asteroid")
+        res = ref.ore_table(ref.load_data())
+        names = {r["name"] for r in res["ores"] if any(x in cof for x in [r["type_id"]] + [v["type_id"] for v in r["variants"]])}
+        self.assertTrue({"Veldspar", "Arkonor", "Bitumens", "Ytterbite"} <= names)
+        self.assertNotIn("Mercoxit", names)                                     # кристаллов для Mercoxit нет
+
+
 class TestFactionWarfare(unittest.TestCase):
     def test_factions_from_game_data(self):
         d = ref.load_fw()

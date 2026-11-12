@@ -7,12 +7,12 @@
   var SECTIONS = [['ore', 'Руда'], ['bp', 'Чертежи'], ['fw', 'Фракционные войны']];
   var WHERE = { hs: ['хай', 'хай-сек (1.0–0.5)'], ls: ['лоу', 'лоу-сек (0.4–0.1)'], ns: ['нули', 'нули (0.0 и ниже)'], wh: ['ВХ', 'червоточины (ВХ)'], pv: ['Почвен', 'Почвен'] };
   var EMP = { amarr: 'Амарр', caldari: 'Калдари', gallente: 'Галленте', minmatar: 'Минматар' };
-  var R = { section: 'ore', data: null, loading: false, cat: '', where: '', empire: '', mineral: '', q: '', sort: '', open: {}, key: null };
+  var R = { section: 'ore', data: null, loading: false, cat: '', where: '', empire: '', mineral: '', q: '', sort: '', open: {}, key: null, oreView: 'ores', cr: null, crLoading: false };
   try {
     var saved = JSON.parse(localStorage.getItem('elw.reference') || '{}');
-    ['section', 'cat', 'where', 'empire', 'mineral', 'sort'].forEach(function (k) { if (typeof saved[k] === 'string') R[k] = saved[k]; });
+    ['section', 'cat', 'where', 'empire', 'mineral', 'sort', 'oreView'].forEach(function (k) { if (typeof saved[k] === 'string') R[k] = saved[k]; });
   } catch (e) { }
-  function remember() { try { localStorage.setItem('elw.reference', JSON.stringify({ section: R.section, cat: R.cat, where: R.where, empire: R.empire, mineral: R.mineral, sort: R.sort })); } catch (e) { } }
+  function remember() { try { localStorage.setItem('elw.reference', JSON.stringify({ section: R.section, cat: R.cat, where: R.where, empire: R.empire, mineral: R.mineral, sort: R.sort, oreView: R.oreView })); } catch (e) { } }
   function ico(t, size) { return t ? '<img class="rf-ico' + (size ? ' ' + size : '') + '" src="' + BASE + '/icons/' + t + '.png" alt="" loading="lazy">' : ''; }
   function chip(attr, val, label, on, title) { return '<button type="button" class="in-chip rf-chip' + (on ? ' on' : '') + '" ' + attr + '="' + esc(val) + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>'; }
   function num(v) { return v >= 1e6 ? L.fmtCompact(v) : L.fmtInt(v); }
@@ -93,10 +93,10 @@
       return;
     }
     if (!R.data) { if (!R.loading) load(); if (!$('rfBody').innerHTML) $('rfBody').innerHTML = '<section class="panel"><p class="muted">Загружаю справочник…</p></section>'; return; }
-    var key = JSON.stringify([R.section, R.cat, R.where, R.empire, R.mineral, R.q, R.sort, R.open, R.data.prices_at, R.drawn || 0]);
+    var key = JSON.stringify([R.section, R.oreView, !!R.cr, R.cat, R.where, R.empire, R.mineral, R.q, R.sort, R.open, R.data.prices_at, R.drawn || 0]);
     if (key === R.key) return;                                   // ядро зовёт render каждые 4 с — рисуем только при изменениях
     R.key = key;
-    drawOres();
+    if (R.oreView === 'crystals') drawCrystals(); else drawOres();
   }
 
   function drawOres() {
@@ -130,7 +130,7 @@
       }).join('') + '</ul>';
     };
     var isk = function (v) { return v ? L.fmtCompact(v) : '—'; };
-    var h = '<section class="panel"><h2>Руда <span class="muted small">вся руда игры — где добывается и во что перерабатывается</span></h2>' +
+    var h = oreViews() + '<section class="panel"><h2>Руда <span class="muted small">вся руда игры — где добывается и во что перерабатывается</span></h2>' +
       '<div class="rf-bar"><span class="lbl">Вид</span>' + chip('data-rf-cat', '', 'вся<span class="n">' + d.ores.length + '</span>', !R.cat) +
       d.cats.map(function (c) { return counts[c[0]] ? chip('data-rf-cat', c[0], esc(c[1]) + '<span class="n">' + counts[c[0]] + '</span>', R.cat === c[0]) : ''; }).join('') + '</div>' +
       '<div class="rf-bar"><span class="lbl">Где</span>' + chip('data-rf-where', '', 'везде', !R.where) +
@@ -145,30 +145,90 @@
       'ISK за м³ — по средним ценам игры' + (d.prices_at ? ' (обновлено ' + esc(L.fmtDateTime(d.prices_at)) + ')' : d.online ? ' — загружаю…' : ' — онлайн-функции выключены') + '. «Где именно» — по EVE University Wiki: пояса по империям и безопасности, рудные аномалии, массивы разведки в нулях; после патчей игры может меняться. ' +
       'Нажмите на руду — варианты с прибавкой к выходу и сжатая руда.</p></section>';
     h += '<section class="panel"><div class="small muted" style="margin-bottom:6px">Показано: ' + rows.length + ' из ' + d.ores.length + '</div><div class="tw"><table class="rf-t"><thead><tr>' +
-      '<th class="l">Руда</th><th class="l" style="min-width:300px">Где именно добывается</th><th class="r hide-m">Объём ед.</th><th class="l">Переработка порции → минералы</th><th class="r">ISK за м³</th><th class="r hide-m">Вариантов</th></tr></thead><tbody>';
+      '<th class="l">Руда</th><th class="l" style="min-width:300px">Где именно добывается</th><th class="r hide-m">Объём ед.</th><th class="l">Переработка порции → минералы</th><th class="r">ISK за м³</th><th class="l hide-m" title="Каким кристаллом добывать — подробнее на «Кристаллы для добычи»">Кристалл</th><th class="r hide-m">Вариантов</th></tr></thead><tbody>';
     rows.forEach(function (r) {
       var k = r.group_id + ':' + r.name, open = !!R.open[k];
       h += '<tr class="rf-row" data-rf-open="' + esc(k) + '" tabindex="0" aria-expanded="' + open + '"><td class="l"><span class="rf-arr">' + (r.variants.length ? (open ? '▾' : '▸') : '') + '</span>' + ico(r.type_id) +
         '<span class="rf-nm">' + esc(r.name) + '</span>' + (r.ru ? ' <span class="rf-sub">' + esc(r.ru) + '</span>' : '') +
         '<span class="rf-cat ' + r.cat + '">' + esc(r.rank || r.cat_name) + '</span></td>' +
         '<td class="l">' + where(r) + '</td><td class="r hide-m">' + vol(r.volume) + '</td>' +
-        '<td class="l rf-mats"><div class="rf-sub">' + L.fmtInt(r.portion) + ' ед. →</div>' + mats(r.mats, R.mineral) + '</td><td class="r">' + isk(r.isk_m3) + '</td><td class="r hide-m">' + (r.variants.length || '—') + '</td></tr>';
+        '<td class="l rf-mats"><div class="rf-sub">' + L.fmtInt(r.portion) + ' ед. →</div>' + mats(r.mats, R.mineral) + '</td><td class="r">' + isk(r.isk_m3) + '</td><td class="l hide-m">' + (r.crystal ? '<span class="rf-cat" data-rf-crys="1" style="cursor:pointer;margin:0">' + esc(r.crystal) + '</span>' : '<span class="rf-sub">нет</span>') + '</td><td class="r hide-m">' + (r.variants.length || '—') + '</td></tr>';
       if (open) r.variants.forEach(function (v) {
         h += '<tr class="rf-var"><td class="l" style="padding-left:34px">' + ico(v.type_id, 'sm') + esc(v.name) +
           (v.bonus ? ' <span class="' + (v.bonus > 0 ? 'rf-plus' : 'rf-minus') + '">' + (v.bonus > 0 ? '+' : '') + v.bonus + '%</span>' : '') + (v.compressed ? ' <span class="rf-cat">сжатая</span>' : '') + '</td>' +
           '<td class="l rf-sub">' + (v.compressed ? 'сжатая: Rorqual, Orca, Porpoise или структура с модулем сжатия' : v.bonus > 0 ? 'та же руда с прибавкой к выходу' : v.bonus < 0 ? 'бедная руда: выход меньше' : '') + '</td>' +
           '<td class="r hide-m">' + vol(v.volume) + '</td><td class="l rf-mats"><div class="rf-sub">' + L.fmtInt(v.portion) + ' ед. →</div>' + mats(v.mats, R.mineral) + '</td>' +
-          '<td class="r">' + isk(v.isk_m3) + '</td><td class="hide-m"></td></tr>';
+          '<td class="r">' + isk(v.isk_m3) + '</td><td class="hide-m"></td><td class="hide-m"></td></tr>';
       });
     });
-    h += (rows.length ? '' : '<tr><td colspan="6" class="muted">Ничего не нашлось.</td></tr>') + '</tbody></table></div></section>';
+    h += (rows.length ? '' : '<tr><td colspan="7" class="muted">Ничего не нашлось.</td></tr>') + '</tbody></table></div></section>';
     var focus = document.activeElement && document.activeElement.id === 'rfQ', pos = focus ? document.activeElement.selectionStart : 0;
     $('rfBody').innerHTML = h;
     if (focus) { var qi = $('rfQ'); qi.focus(); qi.setSelectionRange(pos, pos); }
   }
 
+  function oreViews() {
+    return '<div class="rf-bar" style="margin:0 0 10px">' + chip('data-rf-oview', 'ores', 'Руда', R.oreView !== 'crystals') +
+      chip('data-rf-oview', 'crystals', 'Кристаллы для добычи', R.oreView === 'crystals', 'Какой кристалл на какую руду и чем отличаются типы A, B и C') + '</div>';
+  }
+  function drawCrystals() {
+    if (!R.cr) {
+      if (!R.crLoading) { R.crLoading = true; api('/api/reference/crystals').then(function (j) { R.crLoading = false; if (j.ok) { R.cr = j; R.key = null; draw(); } }, function () { R.crLoading = false; }); }
+      $('rfBody').innerHTML = oreViews() + '<section class="panel"><p class="muted">Загружаю кристаллы…</p></section>';
+      return;
+    }
+    var c = R.cr, pc = function (v) { return String(Math.round(v * 1000) / 10).replace('.', ','); };
+    var rng = function (a, f, unit) { return a[0] === a[1] ? f(a[0]) + (unit || '') : f(a[0]) + '–' + f(a[1]) + (unit || ''); };
+    var x = function (v) { return '×' + String(Math.round(v * 100) / 100).replace('.', ','); };
+    var plus = function (v) { return v ? '+' + String(v).replace('.', ',') + '%' : '0'; };
+    var prng = function (a) { var f = function (v) { return String(v).replace('.', ','); }; return a[0] === a[1] ? plus(a[0]) : '+' + f(a[0]) + '…' + f(a[1]) + '%'; };
+    var h = oreViews() + '<section class="panel"><h2>Кристаллы для добычи <span class="muted small">какой кристалл на какую руду и чем отличаются A, B и C</span></h2>' +
+      '<p class="small" style="margin:4px 0">Кристаллы заряжаются, как патроны, в модулированные шахтёрские лазеры (T2 со словом <b>Modulated</b> в названии) и в ORE Deep Core Mining Laser. ' +
+      'Каждый кристалл подходит только к своему семейству руды: на другой руде он ничего не прибавляет. Кристаллы изнашиваются и ломаются — держите запас. ' +
+      'Для T1-кристалла нужен навык переработки своей руды на 3, для T2 — на 4.</p></section>';
+    // сравнение типов
+    h += '<section class="panel"><h2>Типы A, B и C</h2><div class="tw"><table class="rf-t"><thead><tr><th class="l">Тип</th>' +
+      '<th class="r" title="Сколько руды за один цикл относительно лазера без кристалла">Руды за цикл</th><th class="r">Цикл</th>' +
+      '<th class="r" title="Руды за цикл ÷ длительность цикла">Руды в час</th><th class="r" title="Прибавка к шансу, что часть руды уйдёт в отходы">Шанс отходов</th>' +
+      '<th class="r" title="Насколько больше объём отходов, когда они случаются">Объём отходов</th><th class="r" title="Прибавка к расходу накопителя лазером (у разных семейств разная)">Накопитель</th>' +
+      '<th class="r" title="Шанс повредить кристалл за цикл (у лунных и редких руд выше)">Износ за цикл</th><th class="l">Зачем</th></tr></thead><tbody>' +
+      c.compare.map(function (t) {
+        var best = t.type === 'B' && t.tech === 2, bad = t.type === 'C';
+        return '<tr><td class="l"><b>' + esc(t.type) + ' ' + (t.tech === 2 ? 'II' : 'I') + '</b> <span class="rf-sub">' + esc(t.label) + '</span></td>' +
+          '<td class="r' + (bad ? ' rf-minus' : '') + '">' + rng(t.yield, x) + '</td><td class="r">' + rng(t.duration, x) + '</td>' +
+          '<td class="r"><b class="' + (bad ? 'rf-minus' : best ? 'rf-plus' : '') + '">' + rng(t.per_hour, x) + '</b></td>' +
+          '<td class="r">' + prng(t.residue_chance) + '</td><td class="r">' + prng(t.residue_volume) + '</td><td class="r">' + prng(t.cap) + '</td>' +
+          '<td class="r">' + rng(t.volatility, pc, '%') + '</td><td class="l rf-sub" style="min-width:220px">' + esc(t.tech === 1 ? t.about : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<ul class="small" style="margin:8px 0 0;padding-left:18px;line-height:1.5">' +
+      '<li><b>A</b> — основной выбор: +50% руды (A II +80%) почти без отходов.</li>' +
+      '<li><b>B</b> — столько же руды за цикл, но цикл на 10% (B II на 20%) короче: в час выходит больше всего (B II ×2,25). Цена — отходы (+20…30% к шансу) и накопитель. Хорош, когда руды в поясе много и накопителя хватает.</li>' +
+      '<li><b>C</b> — не для заработка: руды за цикл в 4–5 раз меньше, отходов очень много. Нужен, чтобы быстро «выжечь» пояс или лунный чанк, например на чужой территории.</li>' +
+      '<li>Отходы — часть руды, которая пропадает (уходит из астероида, но не в трюм). Шанс и объём отходов зависят ещё от модуля и навыков.</li></ul></section>';
+    // какой кристалл на какую руду
+    h += '<section class="panel"><h2>Какой кристалл на какую руду</h2><div class="tw"><table class="rf-t"><thead><tr><th class="l">Кристаллы</th><th class="l">Руда</th>' +
+      '<th class="l">Навык</th><th class="r" title="Шанс повредить кристалл за цикл: A I — C II">Износ A I … C II</th></tr></thead><tbody>' +
+      c.families.map(function (f) {
+        var v = f.crystals.map(function (k) { return k.volatility; });
+        return '<tr><td class="l">' + ico(f.crystals[0].id) + '<span class="rf-nm">' + esc(f.ru) + '</span><div class="rf-sub" style="padding-left:28px">' + esc(f.family) + ' Mining Crystal · ' +
+          f.crystals.map(function (k) { return k.type + (k.tech === 2 ? ' II' : ' I'); }).join(', ') + '</div></td>' +
+          '<td class="l" style="white-space:normal">' + esc(f.ores.join(', ')) + (f.special.length ? '<div class="rf-sub">и особые: ' + esc(f.special.join(', ')) + '</div>' : '') +
+          (f.note ? '<div class="rf-sub">' + esc(f.note) + '</div>' : '') + '</td>' +
+          '<td class="l">' + esc(f.skill) + '</td><td class="r">' + pc(Math.min.apply(null, v)) + '–' + pc(Math.max.apply(null, v)) + '%</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p class="small muted" style="margin:8px 0 0">Кристаллов нет для Mercoxit и особых руд заданий и событий — их добывают без кристалла. ' +
+      'Варианты руды (II-, III-, IV-Grade, Brimful, Glistening…) добываются тем же кристаллом, что и базовая руда. Данные — справочник игры и ESI' + (c.built ? ', ' + esc(c.built) : '') + '.</p></section>';
+    $('rfBody').innerHTML = h;
+  }
+
   var tq = null;
   document.addEventListener('click', function (e) {
+    var ov = e.target.closest && e.target.closest('[data-rf-oview],[data-rf-crys]');
+    if (ov && $('rfBody') && $('rfBody').contains(ov)) {
+      e.stopPropagation();
+      R.oreView = ov.hasAttribute('data-rf-crys') ? 'crystals' : ov.getAttribute('data-rf-oview');
+      remember(); R.key = null; draw(); return;
+    }
     var box = $('rfSections') && $('rfSections').parentNode;
     if (!box || !box.contains(e.target)) return;
     var b = e.target.closest('[data-rf-sec],[data-rf-cat],[data-rf-where],[data-rf-emp],[data-rf-open]');
