@@ -7,7 +7,7 @@
   var SECTIONS = [['ore', 'Руда'], ['bp', 'Чертежи'], ['fw', 'Фракционные войны']];
   var WHERE = { hs: ['хай', 'хай-сек (1.0–0.5)'], ls: ['лоу', 'лоу-сек (0.4–0.1)'], ns: ['нули', 'нули (0.0 и ниже)'], wh: ['ВХ', 'червоточины (ВХ)'], pv: ['Почвен', 'Почвен'] };
   var EMP = { amarr: 'Амарр', caldari: 'Калдари', gallente: 'Галленте', minmatar: 'Минматар' };
-  var R = { section: 'ore', data: null, loading: false, cat: '', where: '', empire: '', mineral: '', q: '', sort: '', open: {}, key: null, oreView: 'ores', cr: null, crLoading: false };
+  var R = { section: 'ore', data: null, loading: false, cat: '', where: '', empire: '', mineral: '', q: '', sort: '', open: {}, key: null, oreView: 'ores', cr: null, crLoading: false, up: null, upLoading: false, upEdit: false, upErr: '' };
   try {
     var saved = JSON.parse(localStorage.getItem('elw.reference') || '{}');
     ['section', 'cat', 'where', 'empire', 'mineral', 'sort', 'oreView'].forEach(function (k) { if (typeof saved[k] === 'string') R[k] = saved[k]; });
@@ -94,10 +94,10 @@
       return;
     }
     if (!R.data) { if (!R.loading) load(); if (!$('rfBody').innerHTML) $('rfBody').innerHTML = '<section class="panel"><p class="muted">Загружаю справочник…</p></section>'; return; }
-    var key = JSON.stringify([R.section, R.oreView, !!R.cr, R.cat, R.where, R.empire, R.mineral, R.q, R.sort, R.open, R.data.prices_at, R.drawn || 0]);
+    var key = JSON.stringify([R.section, R.oreView, !!R.cr, R.up && R.up.text, R.upEdit, R.upErr, R.cat, R.where, R.empire, R.mineral, R.q, R.sort, R.open, R.data.prices_at, R.drawn || 0]);
     if (key === R.key) return;                                   // ядро зовёт render каждые 4 с — рисуем только при изменениях
     R.key = key;
-    if (R.oreView === 'crystals') drawCrystals(); else drawOres();
+    if (R.oreView === 'crystals') drawCrystals(); else if (R.oreView === 'upg') drawUpg(); else drawOres();
   }
 
   function drawOres() {
@@ -185,8 +185,62 @@
   document.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-rf-copy]')) { e.preventDefault(); e.target.click(); } });
   function oreViews() {
     return '<div class="rf-bar" style="margin:0 0 10px">' + chip('data-rf-oview', 'ores', 'Руда', R.oreView !== 'crystals') +
-      chip('data-rf-oview', 'crystals', 'Кристаллы для добычи', R.oreView === 'crystals', 'Какой кристалл на какую руду и чем отличаются типы A, B и C') + '</div>';
+      chip('data-rf-oview', 'crystals', 'Кристаллы для добычи', R.oreView === 'crystals', 'Какой кристалл на какую руду и чем отличаются типы A, B и C') +
+      chip('data-rf-oview', 'upg', 'Апгрейды систем', R.oreView === 'upg', 'Где стоят массивы разведки (Prospecting Array): какой минерал, какой уровень, в каких системах') + '</div>';
   }
+  function upLoad() {
+    if (R.upLoading) return;
+    R.upLoading = true;
+    api('/api/reference/upgrades').then(function (j) { R.upLoading = false; if (j.ok) { R.up = j; R.key = null; draw(); } }, function () { R.upLoading = false; });
+  }
+  function drawUpg() {
+    if (!R.up) { upLoad(); $('rfBody').innerHTML = oreViews() + '<section class="panel"><p class="muted">Загружаю апгрейды…</p></section>'; return; }
+    var u = R.up, sec = function (v) { return v === null || v === undefined ? '' : String(v.toFixed(2)).replace('.', ','); };
+    var h = oreViews() + '<section class="panel"><h2>Апгрейды систем <span class="muted small">массивы разведки (Prospecting Array) — где какую руду добывать</span>' +
+      (R.upEdit ? '' : ' <button type="button" class="btn" data-rf-upedit="1" style="float:right">Изменить список</button>') + '</h2>' +
+      '<p class="small" style="margin:4px 0">Массив разведки ставится в суверенный хаб системы и вызывает в ней рудные аномалии с рудой, богатой своим минералом. ' +
+      'Уровень массива — 1, 2 или 3: чем выше, тем богаче аномалии. Нажмите на систему — имя скопируется, на руду — откроется её карточка в таблице руды.</p></section>';
+    if (R.upEdit) {
+      h += '<section class="panel"><h2>Изменить список</h2><p class="small muted" style="margin:4px 0">Одна строка — один массив: «Минерал уровень: системы через запятую». ' +
+        'Минерал можно по-английски или по-русски; безопасность рядом с системой («-0.46») можно оставить — она пропускается. Пример: <code>Pyerite 3: JL-ZUQ, FIZU-X, 1GH-48</code></p>' +
+        '<textarea id="rfUpText" rows="12" spellcheck="false" style="width:100%;box-sizing:border-box;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:13px/1.5 ui-monospace,Consolas,monospace">' + esc(u.text || '') + '</textarea>' +
+        (R.upErr ? '<p class="in-bad small" style="margin:6px 0">' + esc(R.upErr) + '</p>' : '') +
+        '<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="btn" data-rf-upsave="1">Сохранить</button><button type="button" class="btn" data-rf-upcancel="1">Отмена</button></div>' +
+        '<p class="small muted" style="margin:8px 0 0">Список хранится только на этом компьютере, в данных программы.</p></section>';
+    }
+    h += '<section class="panel"><div class="tw"><table class="rf-t"><thead><tr><th class="l">Минерал</th><th class="l">Массив</th><th class="l">Системы</th><th class="l">Руда в аномалиях</th></tr></thead><tbody>' +
+      (u.items.length ? u.items.map(function (x) {
+        return '<tr><td class="l">' + ico(x.mineral) + '<span class="rf-nm">' + esc(x.ru) + '</span> <span class="rf-sub">' + esc(x.name) + '</span></td>' +
+          '<td class="l"><span class="rf-cat equinox" style="margin:0" title="' + esc(x.array) + '">ур. ' + x.level + '</span></td>' +
+          '<td class="l" style="white-space:normal">' + x.systems.map(function (y) {
+            return '<span style="display:inline-block;margin:1px 14px 1px 0;white-space:nowrap">' + copyable(y.name) +
+              (y.sec !== null ? ' <span class="rf-w ns" style="margin:0 0 0 3px">' + sec(y.sec) + '</span>' : ' <span class="rf-sub">нет в данных карты</span>') +
+              (y.region ? ' <span class="rf-sub">' + esc(y.region) + '</span>' : '') + '</span>';
+          }).join('') + '</td>' +
+          '<td class="l">' + (x.ores.length ? x.ores.map(function (o) {
+            return '<a href="#" class="rf-plan" data-rf-upore="' + esc(o[1]) + '" title="Показать в таблице руды">' + ico(o[0], 'sm') + esc(o[1]) + '</a>';
+          }).join(', ') : '—') + '</td></tr>';
+      }).join('') : '<tr><td colspan="4" class="muted">Список пуст — нажмите «Изменить список» и впишите, где стоят массивы.</td></tr>') +
+      '</tbody></table></div></section>';
+    $('rfBody').innerHTML = h;
+  }
+  function upSave() {
+    var t = $('rfUpText') ? $('rfUpText').value : '';
+    api('/api/reference/upgrades', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t }) }).then(function (j) {
+      if (j.ok) { R.up = j; R.upEdit = false; R.upErr = ''; } else R.upErr = j.message || 'Не получилось сохранить.';
+      R.key = null; draw();
+    }, function () { R.upErr = 'Нет связи с трекером.'; R.key = null; draw(); });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-rf-upedit],[data-rf-upsave],[data-rf-upcancel],[data-rf-upore]');
+    if (!b || !$('rfBody') || !$('rfBody').contains(b)) return;
+    e.preventDefault(); e.stopPropagation();
+    if (b.hasAttribute('data-rf-upsave')) { upSave(); return; }
+    if (b.hasAttribute('data-rf-upedit')) { R.upEdit = true; R.upErr = ''; }
+    else if (b.hasAttribute('data-rf-upcancel')) { R.upEdit = false; R.upErr = ''; }
+    else { R.oreView = 'ores'; R.q = b.getAttribute('data-rf-upore'); R.cat = R.where = R.empire = R.mineral = ''; remember(); }
+    R.key = null; draw();
+  });
   function drawCrystals() {
     if (!R.cr) {
       if (!R.crLoading) { R.crLoading = true; api('/api/reference/crystals').then(function (j) { R.crLoading = false; if (j.ok) { R.cr = j; R.key = null; draw(); } }, function () { R.crLoading = false; }); }

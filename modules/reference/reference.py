@@ -276,6 +276,87 @@ def crystal_table(d: dict) -> dict:
     return {"families": fams, "compare": cmp, "built": d.get("built")}
 
 
+# ---------------------------------------------------------------------------
+# Апгрейды систем: массивы разведки Equinox (Prospecting Array 1–3) в суверенных нулях — список пилота, хранится
+# в его данных (reference_upgrades.json), не в модуле: какие системы чьи — это данные альянса, не справочника игры
+# ---------------------------------------------------------------------------
+
+# минерал массива → (название, по-русски, группа руды, которую массив вызывает в аномалиях)
+UPGRADE_MINERALS = {34: ("Tritanium", "Тританий", 462), 35: ("Pyerite", "Пирит", 4513), 36: ("Mexallon", "Мексаллон", 4755),
+                    37: ("Isogen", "Изоген", 4759), 38: ("Nocxium", "Ноксиум", 4756), 39: ("Zydrine", "Зайдрин", 4758),
+                    40: ("Megacyte", "Мегацит", 4757)}
+_UPG_LINE = re.compile(r"^\s*([^\d:]+?)\s*(?:prospecting\s+array|массив(?:\s+разведки)?|ур(?:овень)?\.?|t|т|lvl)?\s*([123])\s*[:\-—–]\s*(.*)$", re.I)
+_SEC_TOKEN = re.compile(r"^\(?[+\-−]?\d+(?:[.,]\d+)?\)?$")
+
+
+def load_systems(path: Optional[str] = None) -> Dict[str, list]:
+    """Имя системы (в верхнем регистре) → [имя, регион, безопасность] — из данных модуля «Карта», если он есть."""
+    try:
+        with open(path or os.path.join(HERE, "..", "map", "map_data.json"), encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    regions, cons = d.get("regions") or {}, d.get("constellations") or {}
+    return {v[0].upper(): [v[0], regions.get(str((cons.get(str(v[1])) or ["", 0])[1]), ""), v[2]] for v in (d.get("systems") or {}).values()}
+
+
+def upgrades_parse(text: str, systems: Optional[Dict[str, list]] = None) -> Tuple[List[dict], List[str]]:
+    """Текст «Pyerite 3: JL-ZUQ, FIZU-X» (строка на массив) → список массивов и список ошибок."""
+    alias = {}
+    for mid, (en, ru, _) in UPGRADE_MINERALS.items():
+        alias[en.lower()] = alias[ru.lower()] = mid
+    items, errors = [], []
+    for n, line in enumerate((text or "").splitlines()[:200], 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = _UPG_LINE.match(line)
+        mid = alias.get(m.group(1).strip().lower()) if m else None
+        if mid is None:
+            errors.append(f"строка {n}: не понял «{line.strip()[:60]}» — нужно «Минерал уровень: системы», например «Pyerite 3: JL-ZUQ, FIZU-X»")
+            continue
+        names = []
+        for tok in re.split(r"[\s,;]+", m.group(3)):
+            tok = tok.strip().strip("()")
+            if not tok or _SEC_TOKEN.match(tok):              # безопасность рядом с системой («-0.46», «(-0.46)») пропускаем
+                continue
+            if systems:
+                hit = systems.get(tok.upper())
+                if not hit:
+                    errors.append(f"строка {n}: нет системы «{tok}»")
+                    continue
+                tok = hit[0]
+            else:
+                tok = tok.upper()
+            if tok not in names:
+                names.append(tok)
+        items.append({"mineral": mid, "level": int(m.group(2)), "systems": names})
+    return items, errors
+
+
+def upgrades_text(items: List[dict]) -> str:
+    return "\n".join(f"{UPGRADE_MINERALS[x['mineral']][0]} {x['level']}: {', '.join(x['systems'])}" for x in items if x.get("mineral") in UPGRADE_MINERALS)
+
+
+def upgrades_view(items: List[dict], systems: Optional[Dict[str, list]] = None, rows: Optional[List[dict]] = None) -> List[dict]:
+    """Для показа: по минералам (Tritanium → Megacyte), сверху старший массив; у систем — регион и безопасность;
+    руда аномалий — из таблицы руды (rows = ore_table(...)["ores"])."""
+    systems = systems or {}
+    ores: Dict[int, List[list]] = {}
+    for r in rows or []:
+        if r["cat"] != "special":
+            ores.setdefault(r["group_id"], []).append([r["type_id"], r["name"], r["ru"]])
+    out = []
+    for x in sorted((x for x in items if x.get("mineral") in UPGRADE_MINERALS), key=lambda x: (x["mineral"], -x["level"])):
+        en, ru, gid = UPGRADE_MINERALS[x["mineral"]]
+        sy = []
+        for name in x["systems"]:
+            hit = systems.get(name.upper())
+            sy.append({"name": hit[0] if hit else name, "region": hit[1] if hit else "", "sec": round(hit[2], 2) if hit else None})
+        out.append({"mineral": x["mineral"], "name": en, "ru": ru, "level": x["level"], "array": f"{en} Prospecting Array {x['level']}",
+                    "systems": sy, "ores": ores.get(gid, [])})
+    return out
+
+
 def load_bp(path: Optional[str] = None) -> dict:
     try:
         with open(path or os.path.join(HERE, "reference_bp.json"), encoding="utf-8") as f:
@@ -495,6 +576,34 @@ def setup(ctx) -> None:
     def crystals(qs):
         return {"ok": True, **crystal_table(crd)}
 
+    upg_path = os.path.join(ctx.data_dir, "reference_upgrades.json")
+    sysd: Dict[str, list] = {}
+
+    def upg_load() -> dict:
+        try:
+            with open(upg_path, encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def upgrades(qs):
+        if not sysd:
+            sysd.update(load_systems())
+        d = upg_load()
+        items = d.get("items") or []
+        return {"ok": True, "items": upgrades_view(items, sysd, ore_table(data)["ores"]), "text": upgrades_text(items), "updated": d.get("updated"),
+                "minerals": [[k, v[0], v[1]] for k, v in UPGRADE_MINERALS.items()]}
+
+    def upgrades_save(body, qs=None):
+        if not sysd:
+            sysd.update(load_systems())
+        items, errors = upgrades_parse(str((body or {}).get("text") or "")[:20000], sysd)
+        if errors:
+            return {"ok": False, "message": "; ".join(errors[:5]) + (f" и ещё {len(errors) - 5}" if len(errors) > 5 else "")}
+        ctx.core.atomic_write_json(upg_path, {"v": 1, "updated": int(time.time()), "items": items})
+        return upgrades(qs)
+
     def ores(qs):
         res = ore_table(data, prices.get(want))
         if ctx.online is not None and not icons_done["v"]:
@@ -545,6 +654,8 @@ def setup(ctx) -> None:
 
     ctx.get("/api/reference/ores", ores)
     ctx.get("/api/reference/crystals", crystals)
+    ctx.get("/api/reference/upgrades", upgrades)
+    ctx.post("/api/reference/upgrades", upgrades_save)
     ctx.get("/api/reference/fw", fw)
     ctx.get("/api/reference/fw/store", fw_shop)
     ctx.get("/api/reference/blueprints", bp_cat)

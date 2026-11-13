@@ -97,6 +97,33 @@ class TestCrystals(unittest.TestCase):
         self.assertNotIn("Mercoxit", names)                                     # кристаллов для Mercoxit нет
 
 
+class TestUpgrades(unittest.TestCase):
+    def test_parse_and_view(self):
+        sy = ref.load_systems()
+        self.assertEqual(sy["HED-GP"][1], "Catch")                              # регион — через созвездие
+        items, err = ref.upgrades_parse("Pyerite 3: hed-gp (-0.39), Jita 0.95\n# заметка\n\nМегацит ур.2: Amarr\n"
+                                        "Tritanium Prospecting Array 1: Jita", sy)
+        self.assertEqual(err, [])
+        self.assertEqual(items[0], {"mineral": 35, "level": 3, "systems": ["HED-GP", "Jita"]})   # безопасность пропущена
+        self.assertEqual([(x["mineral"], x["level"]) for x in items], [(35, 3), (40, 2), (34, 1)])
+        self.assertEqual(ref.upgrades_text(items).splitlines()[1], "Megacyte 2: Amarr")
+        v = ref.upgrades_view(items, sy, ref.ore_table(ref.load_data())["ores"])
+        self.assertEqual([x["mineral"] for x in v], [34, 35, 40])               # по минералам
+        self.assertEqual([o[1] for o in v[0]["ores"]], ["Veldspar"])
+        self.assertEqual([o[1] for o in v[1]["ores"]], ["Mordunium"])
+        self.assertEqual(v[1]["array"], "Pyerite Prospecting Array 3")
+        self.assertEqual(v[1]["systems"][0]["region"], "Catch")
+        self.assertLess(v[1]["systems"][0]["sec"], 0)
+
+    def test_errors(self):
+        sy = ref.load_systems()
+        _, err = ref.upgrades_parse("Unobtanium 2: Jita\nIsogen 2: NOPE-1", sy)
+        self.assertEqual(len(err), 2)
+        self.assertIn("NOPE-1", err[1])
+        items, err = ref.upgrades_parse("Isogen 2: abc-1", {})                   # без данных карты — как написано
+        self.assertEqual((items[0]["systems"], err), (["ABC-1"], []))
+
+
 class TestFactionWarfare(unittest.TestCase):
     def test_factions_from_game_data(self):
         d = ref.load_fw()
