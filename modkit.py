@@ -28,7 +28,7 @@ from typing import Callable, Dict, List, Optional
 
 ID_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 WEB_RE = re.compile(r"^[A-Za-z0-9_\-]+\.(js|css|png|svg)$")
-RETIRED = {"fits"}                                   # убранные модули: остались в папке после распаковки поверх — не грузить
+RETIRED = {"fits", "alliance_auth"}                                   # убранные модули: остались в папке после распаковки поверх — не грузить
 log = logging.getLogger("modkit")
 
 

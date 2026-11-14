@@ -70,10 +70,7 @@ DEFAULT_CONFIG = {
     "esi_contact": "",                 # контакт для User-Agent ESI (необязательно)
     "ore_prices_override": {},         # {"Veldspar": 15.5} — ручные цены, приоритетнее ESI
     "notifiers": {},                   # зарезервировано для будущих получателей (Discord и т.п.)
-    "aa_url": "",                      # Alliance Auth с плагином Fleet Watch (пусто = не отправлять)
-    "aa_key": "",                      # личный ключ со страницы «Мои логи» в AA
-    "aa_live_upload": True,            # отправлять идущую сессию раз в минуту
-    "esi_client_id": "",               # Client ID приложения EVE (developers.eveonline.com) — флот без Alliance Auth
+    "esi_client_id": "",               # Client ID приложения EVE (developers.eveonline.com) — вход через EVE
     "update_check": True,              # сверять версии приложения и модулей с последним выпуском на GitHub
     "update_check_hours": 6,
     "update_repo": "",                 # «владелец/репозиторий» на GitHub; пусто = официальный (UPDATE_REPO)
@@ -1424,7 +1421,6 @@ class Watcher:
                 "history_count": len(self.history.ids_jsonl),
                 "gap": self.cfg["session_gap_seconds"], "version": VERSION,
                 "notifiers": [getattr(n, "name", "?") for n in self.notifiers],
-                "aa": None,
                 **self._module_status(),
             }
 
@@ -2301,39 +2297,16 @@ def main(argv=None) -> int:
     ap.add_argument("--stop", action="store_true", help="остановить фоновую версию")
     ap.add_argument("--dump-unparsed", action="store_true", help="вывести нераспознанные строки")
     ap.add_argument("--data-dir", default=None, help="папка с config.json и данными (по умолчанию — рядом со скриптом)")
-    ap.add_argument("--aa-connect", nargs=2, metavar=("URL", "KEY"), help="подключить Alliance Auth (Fleet Watch)")
-    ap.add_argument("--aa-disconnect", action="store_true", help="отключить отправку в AA")
-    ap.add_argument("--aa-upload-history", action="store_true", help="отправить накопленную историю в AA")
     args = ap.parse_args(argv)
 
     data_dir = os.path.abspath(args.data_dir or SCRIPT_DIR)
     os.makedirs(data_dir, exist_ok=True)
-    aa_cmd = args.aa_connect or args.aa_disconnect or args.aa_upload_history
-    interactive = args.console or args.backfill or args.stop or args.dump_unparsed or aa_cmd
+    interactive = args.console or args.backfill or args.stop or args.dump_unparsed
     setup_logging(data_dir, interactive)
     cfg = load_config(data_dir)
 
     if args.stop:
         return stop_running(cfg, data_dir)
-
-    if args.aa_connect or args.aa_upload_history:
-        mod = modkit.find(modkit.modules_dir(SCRIPT_DIR), "alliance_auth")
-        if mod is None:
-            print("Модуль «Alliance Auth» не установлен (папка modules/alliance_auth).")
-            return 2
-        aa = modkit.import_file(mod, mod.meta["entry"])
-        aa.bind(sys.modules[__name__])
-        if args.aa_connect:
-            return aa.aa_connect(cfg, data_dir, *args.aa_connect)
-        return aa.aa_upload_history(cfg, data_dir, args.days)
-    if args.aa_disconnect:
-        path = os.path.join(data_dir, "config.json")
-        with open(path, "r", encoding="utf-8-sig") as f:
-            user_cfg = json.load(f)
-        user_cfg.update(aa_url="", aa_key="")
-        atomic_write_json(path, user_cfg, indent=2)
-        print("Отправка в AA отключена.")
-        return 0
 
     if args.dump_unparsed:
         # читаем state.json напрямую, не мешая работающей фоновой версии

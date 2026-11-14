@@ -23,7 +23,6 @@ overlay, fleet composition via ESI, item appraisal and a reprocessing calculator
 | `ess` | **Выплаты ESS** и реальные выплаты баунти из журнала кошелька (ESI): ESS и «баунти с ESS» на «Обзоре» и во вкладке «Баунти», сверка лога с кошельком. Вход — общий «данные персонажа» (отдельное приложение EVE, не флотское), несколько персонажей |
 | `reference` | **Справочник** по данным игры. Раздел «Руда»: вся руда (обычная, лунная R4–R64, Equinox, Почвен, особая) — где добывается, во что перерабатывается, варианты и сжатая руда, ISK за м³. Раздел «Чертежи»: все чертежи деревом групп рынка и поиск; как получить — оригинал у NPC, изобретение T2, реверс T3 из реликвий, LP-магазины, редкие копии |
 | `damage_types` | Каким уроном бьёт враг: ЭМ, термо, кинетика, взрыв |
-| `alliance_auth` | Отправка итогов сессий на ваш сервер Alliance Auth (плагин Fleet Watch) |
 
 Как устроены модули и как написать свой — [modules/README.md](modules/README.md).
 
@@ -82,7 +81,7 @@ Bottles, дополнительные библиотеки Steam). Если па
 - Сеть: справочники и цены — с серверов CCP (`esi.evetech.net`, `images.evetech.net`), вход — `login.eveonline.com`,
   отчёт о бое — `zkillboard.com` (только когда вы его собираете).
   Проверка обновлений — `api.github.com` и `github.com` (выключить: `"update_check": false`).
-  Отправка на Alliance Auth — только если вы сами его подключили. Логи, ники и статистика никуда больше не уходят.
+  Логи, ники и статистика никуда больше не уходят.
 - Токен входа EVE хранится зашифрованным средствами Windows и на другом компьютере не откроется. «Отключить аккаунт» удаляет его.
 - Отключить всю сеть: `"online_enabled": false` в `config.json` (оценка и справочники перестанут работать).
 
@@ -96,9 +95,8 @@ Bottles, дополнительные библиотеки Steam). Если па
 | `python eve_log_app.py` | приложение целиком: трей, окно, оверлей (нужны `pywebview`, `pystray`, `pillow`) |
 | `python modules/overlay/overlay.py --demo` | оверлей с выдуманными числами |
 | `python eve_log_watcher.py --backfill --days 90` | пересобрать историю из старых логов |
-| `python eve_log_watcher.py --aa-connect URL KEY` | подключить Alliance Auth (`--aa-upload-history`, `--aa-disconnect`) |
 
-Те же действия есть в bat-файлах в корне (`test_in_window.bat`, `start_overlay.bat`, `connect_aa.bat` и др.).
+Те же действия есть в bat-файлах в корне (`test_in_window.bat`, `start_overlay.bat` и др.).
 
 ### Сборка exe
 
@@ -146,8 +144,7 @@ build_app.py         сборка exe
 | `online_enabled` | `true` | запросы к ESI |
 | `price_auto_refresh_minutes` | 60 | автообновление цен руды, пока открыта страница |
 | `ore_prices_override` | `{}` | ручные цены руды, например `{"Veldspar": 15.5}` |
-| `modules` | `{}` | включённые и выключенные модули, например `{"alliance_auth": false}` |
-| `aa_url`, `aa_key`, `aa_live_upload` | | модуль `alliance_auth` |
+| `modules` | `{}` | включённые и выключенные модули, например `{"map": false}` |
 | `esi_client_id` | `""` | свой Client ID приложения EVE вместо встроенного (модуль `fleet`) |
 | `update_check`, `update_check_hours` | `true`, 6 | сверка версий с GitHub |
 | `update_repo` | `""` | другой репозиторий для обновлений (`владелец/репозиторий`) |

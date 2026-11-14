@@ -603,10 +603,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  // Встраивание (например, в Alliance Auth): window.ELW_CFG = {base, mode, csrf, theme, title}
+  // Встраивание в другую страницу: window.ELW_CFG = {base, csrf, theme, title}
   var CFG = window.ELW_CFG || {};
   var BASE = CFG.base || '';
-  var AA_MODE = CFG.mode === 'aa';
   if (CFG.theme === 'dark' || CFG.theme === 'light') document.documentElement.setAttribute('data-theme', CFG.theme);
   (function () {                                         // кнопка темы; при встраивании с заданной темой её нет
     var btn = $('themeBtn'), root = document.documentElement;
@@ -918,7 +917,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     if (!lv) { el.innerHTML = empty('Загрузка…'); return; }
     var list = (lv.sessions || []).filter(function (s) { return !S.who || s.who === S.who; });
     var h = '';
-    if (!AA_MODE && !lv.logs_dir_exists) {
+    if (!lv.logs_dir_exists) {
       h += '<div class="notice warn">Папка логов не найдена: <code>' + esc(lv.logs_dir) + '</code>. Укажите её на вкладке <a href="#" data-goto="modules">«Настройки»</a> и перезапустите трекер.</div>';
     }
     if (!list.length) {
@@ -1235,20 +1234,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
 
   function renderFooter() {
     var lv = S.live;
-    var aa = lv && lv.aa, aaText = ' · данные только на этом компьютере';
-    if (aa && aa.configured) {
-      aaText = ' · итоги отправляются в AA <b>' + esc(aa.host) + '</b>' +
-        (aa.last_ok ? ' (последняя отправка ' + esc(L.fmtTime(aa.last_ok)) + ')' : '') +
-        (aa.queue ? ' · в очереди: ' + esc(aa.queue) : '') +
-        (aa.last_error ? ' · <span style="color:var(--warn)">ошибка: ' + esc(aa.last_error) + '</span>' : '') +
-        (aa.rejected ? ' · отклонено: ' + esc(aa.rejected) : '');
-    }
-    if (AA_MODE) {
-      $('footer').innerHTML = lv ? 'Данные из EVE Log Watcher пилотов, загруженные в Alliance Auth · время показано в часовом поясе браузера' +
-        (S.meta && S.meta.status && S.meta.status.ok === false ? ' · <span style="color:var(--warn)">ESI недоступен: ' + esc(S.meta.status.message) + '</span>' : '') : '';
-      return;
-    }
-    $('footer').innerHTML = lv ? 'Версия ' + esc(lv.version) + ' · логи: <code>' + esc(lv.logs_dir) + '</code> · время показано в часовом поясе браузера' + aaText +
+    var localText = ' · данные только на этом компьютере';
+    $('footer').innerHTML = lv ? 'Версия ' + esc(lv.version) + ' · логи: <code>' + esc(lv.logs_dir) + '</code> · время показано в часовом поясе браузера' + localText +
       (S.meta && S.meta.status && S.meta.status.ok === false ? ' · <span style="color:var(--warn)">ESI недоступен: ' + esc(S.meta.status.message) + '</span>' : '') : '';
   }
 
@@ -1443,7 +1430,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
                  render: render, addTab: addTab, base: BASE, version: 1,
                  hook: function (name, fn) { (HOOKS[name] = HOOKS[name] || []).push(fn); } };
   function loadModules() {
-    if (AA_MODE) return Promise.resolve();
     return api('/api/modules').then(function (j) {
       if (j._status !== 200 || !j.ok) { MODS = []; return; }
       MODS = j.modules || [];
@@ -1507,7 +1493,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       others.map(function (f) { return '<div class="small"><a href="#" data-logpath="' + esc(f.path) + '">' + logsLine(f) + '</a></div>'; }).join('') : '';
   }
   function loadLogsSettings(force) {
-    if (AA_MODE || (!force && Date.now() - LOGS.at < 15000)) return;
+    if (!force && Date.now() - LOGS.at < 15000) return;
     LOGS.at = Date.now();
     api('/api/settings/logs').then(function (j) { if (j.ok) { LOGS.data = j; renderLogs(); } }, function () { });
   }
@@ -1549,7 +1535,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
   // ---------- персонажи EVE: вход «данные персонажа» (eve_sso) ----------
   var EVE = { at: 0, data: null };
   function loadEve(force) {
-    if (AA_MODE || (!force && Date.now() - EVE.at < 15000)) return;
+    if (!force && Date.now() - EVE.at < 15000) return;
     EVE.at = Date.now();
     api('/api/eve/status').then(function (j) { if (j.ok) { EVE.data = j; renderEve(); } }, function () { });
   }
@@ -1625,7 +1611,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     box.innerHTML = h;
   }
   function loadUpdates() {
-    if (AA_MODE) return;
     api('/api/updates').then(function (j) {
       if (j._status !== 200) return;
       UPD = j;
@@ -1703,7 +1688,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       S.live = j; S.lastOk = Date.now();
       var p = j.progress || {};
       if (!j.initial_done) setStatus('warn', 'импорт логов… ' + (p.files_done || 0) + '/' + (p.files_total || 0));
-      else if (!AA_MODE && !j.logs_dir_exists) setStatus('bad', 'папка логов не найдена');
+      else if (!j.logs_dir_exists) setStatus('bad', 'папка логов не найдена');
       else setStatus('ok', j.sessions.length ? 'идёт сессия' : 'наблюдение');
       $('updated').textContent = 'обновлено ' + L.fmtTimeS(j.now);
       if (S.unparsed && S.unparsed.total !== j.unparsed_total) loadUnparsed();
@@ -1716,11 +1701,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
   var csvLink = document.querySelector('a[href="/history.csv"]');
   if (csvLink) csvLink.href = BASE + '/history.csv';
   if (CFG.title) document.querySelector('header.top h1').textContent = CFG.title;
-  if (AA_MODE) {
-    $('tab-unparsed').classList.add('hidden');
-    $('tab-modules').classList.add('hidden');              // модули есть только в настольном приложении
-    if (S.tab === 'unparsed' || S.tab === 'modules' || !$('tab-' + S.tab)) S.tab = 'overview';
-  }
   render();
   loadModules().then(loadUpdates);
   setInterval(loadUpdates, 10 * 60 * 1000);

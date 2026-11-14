@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Флот без Alliance Auth: вход через EVE (PKCE), опрос ESI, время во флоте, отлучки, отметки, история."""
+"""Флот: вход через EVE (PKCE), опрос ESI, время во флоте, отлучки, отметки, история."""
 import base64
 import json
 import os
@@ -177,7 +177,7 @@ class TestLocalFleet(unittest.TestCase):
 
 
 class TestLocalFleetInApp(unittest.TestCase):
-    """То же через трекер: адреса страницы, вход, отслеживание — без Alliance Auth."""
+    """То же через трекер: адреса страницы, вход, отслеживание."""
 
     def setUp(self):
         import http.client
@@ -216,7 +216,7 @@ class TestLocalFleetInApp(unittest.TestCase):
         except ValueError:
             return r.status, raw.decode("utf-8", "replace")
 
-    def test_full_flow_without_alliance_auth(self):
+    def test_full_flow(self):
         st = self.req("/api/sso")[1]
         self.assertEqual((st["source"], st["client_id_set"], st["logged_in"], st["available"]), ("", False, False, True))
         self.assertEqual([m["id"] for m in self.req("/api/modules")[1]["modules"]], ["fleet"])

@@ -9,7 +9,7 @@
     html: "      <section class=\"panel\" id=\"fleetSource\"></section>\n      <section class=\"panel\"><h2>Мой флот <span class=\"muted small\" id=\"fleetUpdated\"></span></h2>\n        <div class=\"controls\">\n          <label class=\"small muted\">Флот\n            <select id=\"fleetSel\" aria-label=\"Какой флот показать\"><option value=\"\">Текущий</option></select></label>\n          <button type=\"button\" class=\"btn primary\" id=\"fleetTrack\">Отслеживать мой флот</button>\n          <button type=\"button\" class=\"btn hidden\" id=\"fleetStop\">Остановить отслеживание</button>\n          <button type=\"button\" class=\"btn\" id=\"fleetReload\">Обновить</button>\n          <label class=\"small muted\">Помечать, если не с боссом дольше\n            <select id=\"fleetAway\" aria-label=\"Порог отсутствия\">\n              <option value=\"3\">3 минут</option><option value=\"5\">5 минут</option><option value=\"10\">10 минут</option>\n            </select></label>\n          <span class=\"small muted\" id=\"fleetMsg\" role=\"status\" aria-live=\"polite\"></span>\n        </div>\n        <div id=\"fleetBody\"></div>\n      </section>\n    \n<dialog id=\"fdlg\" aria-labelledby=\"fdlgTitle\">\n  <div class=\"dlg-head\"><h2 id=\"fdlgTitle\">Пилоты</h2><button type=\"button\" class=\"btn\" id=\"fdlgClose\">Закрыть</button></div>\n  <div class=\"dlg-body\" id=\"fdlgBody\"></div>\n</dialog>",
     render: function () { renderFleet(); } });
 
-  // ---------- флот: состав из Fleet Watch (Alliance Auth) через трекер ----------
+  // ---------- флот: состав из ESI через трекер ----------
   var FLEET = { data: null, at: 0, busy: false, epoch: 0, again: false, sel: '', list: [], listAt: 0 };
   // история: список своих флотов; выбранный прошлый флот показывается тем же экраном
   function loadFleetList(force) {
@@ -43,7 +43,7 @@
         if (S.tab === 'fleet') renderFleet();
       });
   }
-  // ---------- откуда берётся флот: вход через EVE в самом приложении или Alliance Auth ----------
+  // ---------- откуда берётся флот: вход через EVE в самом приложении ----------
   var SSO = { st: null, at: 0, msg: '' };
   function loadSso(force) {
     if (!force && Date.now() - SSO.at < 4000) return;
@@ -287,7 +287,7 @@
   });
   $('fleetTrack').addEventListener('click', function () {
     var btn = this, msg = $('fleetMsg');
-    btn.disabled = true; msg.textContent = 'Спрашиваю Alliance Auth…';
+    btn.disabled = true; msg.textContent = 'Спрашиваю ESI…';
     api('/api/fleet/track', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(function (j) {
       msg.textContent = j.message || (j.ok ? 'Отслеживание включено.' : 'Не получилось.');
       btn.disabled = false;
