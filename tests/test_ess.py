@@ -131,3 +131,30 @@ class TestSsoDispatch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPending(unittest.TestCase):
+    """«Ожидаемая ESS» обнуляется выплатой: считается баунти по логам только после последней выплаты ESS."""
+
+    def test_bounty_since(self):
+        recs = [{"id": "a", "t0": 1000, "t1": 1500, "bounty": 100.0},                       # до выплаты — не считается
+                {"id": "b", "t0": 1800, "t1": 2400, "bounty": 300.0,                        # выплата в 2000 — внутри сессии
+                 "per_min": [[1800, 0, 0, 0, 100.0], [1920, 0, 0, 0, 50.0], [1980, 0, 0, 0, 70.0], [2100, 0, 0, 0, 80.0]]},
+                {"id": "c", "t0": 3000, "t1": 3600, "bounty": 500.0}]                       # после — целиком
+        self.assertEqual(ess.bounty_since(recs, 2000), 70.0 + 80.0 + 500.0)                 # минута с выплатой — считается
+        light = [dict(recs[1], per_min=None)]
+        light[0].pop("per_min")
+        self.assertEqual(ess.bounty_since(light, 2000, lambda rid: recs[1] if rid == "b" else None), 150.0)
+        self.assertEqual(ess.bounty_since(recs, 5000), 0)
+
+    def test_last_ess(self):
+        t = TempDirs()
+        self.addCleanup(t.cleanup)
+        if True:
+            w = ess.Wallet(t.data, None, lambda p, x: None)
+            w.data["chars"] = {"1": {"name": "Ratter One", "synced": 9, "entries": {
+                "e1": [100, "ess", 5.0, 0, ""], "e2": [300, "ess", 7.0, 0, ""], "e3": [400, "bounty", 1.0, 0, ""]}},
+                "2": {"name": "Alt", "entries": {}}}
+            last = w.last_ess()
+            self.assertEqual(last["Ratter One"], {"t": 300, "amount": 7.0, "synced": 9})
+            self.assertEqual(last["Alt"]["t"], 0)

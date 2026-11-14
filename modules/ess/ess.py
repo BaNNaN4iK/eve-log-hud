@@ -25,6 +25,22 @@ SYNC_S = 30 * 60                       # ESI кэширует журнал ко�
 KEEP_S = 400 * 86400
 
 
+def bounty_since(records: list, t: int, full: Callable[[str], Optional[dict]] = lambda rid: None) -> float:
+    """Баунти по логам начиная с момента t: сессии целиком после t, у сессии, на которую t попало, — поминутно (per_min)."""
+    total = 0.0
+    for r in records:
+        if (r.get("t1") or 0) < t or not r.get("bounty"):
+            continue
+        if (r.get("t0") or 0) >= t:
+            total += r["bounty"]
+            continue
+        pm = r.get("per_min")
+        if pm is None:
+            pm = (full(r.get("id") or "") or {}).get("per_min") or []
+        total += sum(row[4] for row in pm if len(row) > 4 and row[0] + 60 > t)
+    return round(total, 2)
+
+
 def _iso(ts: str) -> int:
     """«2026-10-29T12:00:00Z» → unix-время."""
     import calendar
@@ -130,6 +146,18 @@ class Wallet:
         payments.sort(key=lambda p: -p["t"])
         return {"ess": round(ess, 2), "bounty_paid": round(paid, 2), "payments": payments[:300], "count": len(payments), "by_day": by_day}
 
+    def last_ess(self) -> dict:
+        """Персонаж (имя) → время и сумма последней выплаты ESS."""
+        out = {}
+        for c in self.data["chars"].values():
+            best = None
+            for ts, kind, amount, _sys, _desc in c.get("entries", {}).values():
+                if kind == "ess" and (best is None or ts > best[0]):
+                    best = (ts, amount)
+            if c.get("name"):
+                out[c["name"]] = {"t": best[0] if best else 0, "amount": best[1] if best else 0, "synced": c.get("synced") or 0}
+        return out
+
     def status(self) -> list:
         out = []
         for cid, c in self.auth.chars.items():
@@ -155,6 +183,28 @@ def setup(ctx) -> None:
             return {"ok": False, "message": "Неверный период"}
         return {"ok": True, "linked": bool(auth.chars), **wallet.report(t0, t1, g("who"))}
 
+    def pending(qs):
+        """Баунти с последней выплаты ESS по каждому подключённому персонажу — из него «ожидаемая ESS», обнуляется выплатой."""
+        who = (qs.get("who") or [""])[0]
+        last = wallet.last_ess()
+        names = [c["name"] for cid, c in auth.chars.items() if auth.has(cid, WALLET)]
+        w = ctx.watcher
+        recs = w.history.records() if w is not None else []
+        live = w.live()["sessions"] if w is not None else []
+        out = []
+        for name in names:
+            if who and name != who:
+                continue
+            l = last.get(name) or {"t": 0, "amount": 0, "synced": 0}
+            if not l["t"]:
+                out.append({"name": name, "last_t": 0, "last_amount": 0, "synced": l["synced"], "bounty": None})
+                continue
+            mine = [r for r in recs if r.get("who") == name]
+            b = bounty_since(mine, l["t"], w.history.get if w is not None else (lambda rid: None)) + \
+                bounty_since([s for s in live if s.get("who") == name], l["t"])
+            out.append({"name": name, "last_t": l["t"], "last_amount": l["amount"], "synced": l["synced"], "bounty": b})
+        return {"ok": True, "chars": out}
+
     def sync(body=None, qs=None):
         if not auth.chars:
             return {"ok": False, "message": "Сначала подключите персонажа."}
@@ -173,5 +223,6 @@ def setup(ctx) -> None:
 
     ctx.get("/api/ess/status", status)
     ctx.get("/api/ess", report)
+    ctx.get("/api/ess/pending", pending)
     ctx.post("/api/ess/sync", sync)
     ctx.thread(loop, "ess")
