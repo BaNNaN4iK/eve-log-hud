@@ -4,7 +4,17 @@
   if (!ELW || !ELW.hook) return;
   var api = ELW.api, esc = ELW.esc, L = ELW.L, tile = ELW.tile;
   var POST = { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' };
-  var E = { status: null, data: {}, wait: {}, msg: '', statusAt: 0 };
+  var E = { status: null, data: {}, wait: {}, msg: '', statusAt: 0, share: 60 };
+  try { var sv = parseFloat(localStorage.getItem('elw.ess.share')); if (sv >= 0 && sv <= 100) E.share = sv; } catch (e) { }
+  // ожидаемая выплата ESS: доля от баунти по логам (по умолчанию 60%)
+  function expected(T) { return (T.bounty || 0) * E.share / 100; }
+  function pctTxt() { return String(E.share).replace('.', ',') + '%'; }
+  function expTile(T, d) {
+    var ex = expected(T);
+    var sub = pctTxt() + ' от баунти · с баунти ' + L.fmtIsk((T.bounty || 0) + ex);
+    if (d) sub = pctTxt() + ' от баунти · пришло ' + L.fmtIsk(d.ess) + (ex ? ' (' + Math.round(d.ess * 100 / ex) + '%)' : '');
+    return tile('Ожидаемая ESS', L.fmtIsk(ex), sub, 'bounty');
+  }
 
   function key(sel) { return sel.range.from + '|' + sel.range.to + '|' + (ELW.S.who || ''); }
   function load(sel) {
@@ -32,31 +42,45 @@
     }, function () { E.msg = 'Нет связи с трекером.'; ELW.render(); });
   }
 
-  // «Обзор»: ESS за период и итого с ним
+  // «Обзор»: ожидаемая ESS (доля от баунти по логам), ESS за период и итого с ней
   ELW.hook('overview', function (sel, T) {
     var st = status();
-    if (!st || !st.chars.length) return {};
+    var exp = T.bounty ? expTile(T, null) : '';
+    if (!st || !st.chars.length) return { tiles: exp };
     var d = load(sel);
-    return { tiles: tile('Выплаты ESS', d ? L.fmtIsk(d.ess) : '…', d ? 'баунти с ESS ' + L.fmtIsk((T.bounty || 0) + d.ess) : 'загружаю', 'bounty') };
+    return { tiles: (T.bounty ? expTile(T, d) : '') + tile('Выплаты ESS', d ? L.fmtIsk(d.ess) : '…', d ? 'баунти с ESS ' + L.fmtIsk((T.bounty || 0) + d.ess) : 'загружаю', 'bounty') };
+  });
+  function shareBox() {
+    return '<label class="small muted" title="Какую долю от баунти по логам считать ожидаемой выплатой ESS">Ожидаемая ESS — доля от баунти ' +
+      '<input id="essShare" value="' + esc(String(E.share).replace('.', ',')) + '" inputmode="decimal" style="width:4em;text-align:right;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:2px 6px"> %</label>';
+  }
+  document.addEventListener('change', function (e) {
+    if (!e.target || e.target.id !== 'essShare') return;
+    var v = parseFloat(String(e.target.value).replace(',', '.'));
+    if (!(v >= 0 && v <= 100)) { e.target.value = String(E.share).replace('.', ','); return; }
+    E.share = v;
+    try { localStorage.setItem('elw.ess.share', String(v)); } catch (err) { }
+    ELW.render();
   });
 
   // «Баунти»: плитки, сверка с CCP, персонажи, список выплат
   ELW.hook('bounty', function (sel, T) {
     var st = status();
-    if (!st) return {};
-    var head = '<section class="panel"><h2>Выплаты ESS и кошелёк <span class="small muted">из журнала кошелька в игре (ESI)</span></h2>';
+    var head = '<section class="panel"><h2>Выплаты ESS и кошелёк <span class="small muted">из журнала кошелька в игре (ESI)</span></h2>' +
+      '<div class="controls" style="margin-bottom:6px">' + shareBox() + '</div>';
+    if (!st) return { tiles: expTile(T, null) };
     if (!st.chars.length) {
-      return { html: head + '<p class="small" style="margin-top:0">В системах с ESS часть баунти уходит в банк ESS и приходит отдельной выплатой раз в ~3 часа. ' +
+      return { tiles: expTile(T, null), html: head + '<p class="small" style="margin-top:0">В системах с ESS часть баунти уходит в банк ESS и приходит отдельной выплатой раз в ~3 часа. ' +
         'В логи игры она не попадает — поэтому «Баунти» выше без неё. Подключите персонажа, и приложение будет брать выплаты ESS и реальные выплаты баунти из журнала кошелька.</p>' +
         (st.client_id_set ? '<div class="controls"><button type="button" class="btn primary" data-ess="login">Подключить персонажа (вход через EVE)</button>' +
           '<span class="small muted">Общий вход «данные персонажа» (кошелёк, склад, добыча, киллмейлы) — отдельное приложение EVE, не флотское. Персонажи — и в «Настройках».</span></div>' :
           '<p class="small">Сначала впишите Client ID приложения EVE «данные персонажа»: <a href="#" data-goto="modules">«Настройки» → «Персонажи EVE»</a>.</p>') +
         (E.msg ? '<div class="small" role="status">' + esc(E.msg) + '</div>' : '') + '</section>' };
     }
-    var d = load(sel), tiles = '';
+    var d = load(sel), tiles = expTile(T, null);
     if (d) {
       var diff = d.bounty_paid - (T.bounty || 0);
-      tiles = tile('Выплаты ESS', L.fmtIsk(d.ess), 'выплат: ' + L.fmtInt(d.count), 'bounty') +
+      tiles = expTile(T, d) + tile('Выплаты ESS', L.fmtIsk(d.ess), 'выплат: ' + L.fmtInt(d.count), 'bounty') +
         tile('Баунти с ESS', L.fmtIsk((T.bounty || 0) + d.ess), 'по логам + ESS', 'bounty') +
         tile('Выплачено CCP', d.bounty_paid ? L.fmtIsk(d.bounty_paid) : '—', d.bounty_paid ? (Math.abs(diff) < 1 ? 'совпадает с логами' : (diff > 0 ? 'больше логов на ' : 'меньше логов на ') + L.fmtIsk(Math.abs(diff))) : 'баунти из кошелька за период');
     }
@@ -66,7 +90,7 @@
         ' <button type="button" class="btn" data-ess="logout" data-id="' + c.id + '" title="Отключить персонажа" style="padding:0 6px">×</button></span>';
     }).join('') + '<button type="button" class="btn" data-ess="login">+ персонаж</button><button type="button" class="btn" data-ess="sync"' + (st.busy ? ' disabled' : '') + '>' + (st.busy ? 'Обновляю…' : 'Обновить') + '</button></div>' +
       (E.msg ? '<div class="small" role="status" style="margin-bottom:6px">' + esc(E.msg) + '</div>' : '') +
-      '<div class="small muted" style="margin-bottom:8px">«Баунти» выше — из логов (ваша доля сразу за каждого NPC). ESS — доля из банка ESS, приходит раз в ~3 часа; если банк украли, выплаты не будет. ' +
+      '<div class="small muted" style="margin-bottom:8px">«Баунти» выше — из логов (ваша доля сразу за каждого NPC). ESS — доля из банка ESS, приходит раз в ~3 часа; если банк украли, выплаты не будет. «Ожидаемая ESS» — сколько должно прийти: заданная доля от баунти по логам. ' +
       '«Выплачено CCP» — что реально пришло на кошелёк как баунти (раз в 20 минут): так видно, сходится ли лог с игрой. Журнал кошелька ESI отдаёт за 30 дней — приложение копит историю у себя.</div>';
     if (!d) h += '<p class="small muted">Загружаю выплаты…</p>';
     else if (!d.payments.length) h += '<p class="small muted">Выплат ESS за этот период нет' + (ELW.S.who ? ' у ' + esc(ELW.S.who) : '') + '.</p>';
