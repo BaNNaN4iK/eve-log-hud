@@ -26,11 +26,12 @@
     var pc = pending(), known = (pc || []).filter(function (c) { return c.bounty !== null; });
     if (known.length) {                                         // с последней выплаты: выплата пришла — снова с нуля
       var b = known.reduce(function (a, c) { return a + c.bounty; }, 0);
-      var last = Math.max.apply(null, known.map(function (c) { return c.last_t; }));
+      var since = Math.max.apply(null, known.map(function (c) { return c.since || c.last_t; }));
+      var timer = known.some(function (c) { return c.by_timer; });
       var who = known.length === 1 ? '' : ' (' + known.length + ' персонажа)';
-      var lastAmt = known.length === 1 ? ' на ' + L.fmtIsk(known[0].last_amount) : '';
+      var how = timer ? ' — выплата по таймеру 2:45, в кошельке ещё не видна' : (known.length === 1 ? ' — пришла ' + L.fmtIsk(known[0].last_amount) : '');
       return tile('Ожидаемая ESS', L.fmtIsk(b * E.share / 100),
-        pctTxt() + ' от баунти ' + L.fmtIsk(b) + ' с последней выплаты · ' + esc(L.fmtDateTime(last)) + lastAmt + who, 'bounty');
+        pctTxt() + ' от баунти ' + L.fmtIsk(b) + ' с выплаты в ' + esc(L.fmtDateTime(since)) + how + who, 'bounty');
     }
     var ex = expected(T);
     var sub = pctTxt() + ' от баунти · с баунти ' + L.fmtIsk((T.bounty || 0) + ex);
@@ -112,7 +113,7 @@
         ' <button type="button" class="btn" data-ess="logout" data-id="' + c.id + '" title="Отключить персонажа" style="padding:0 6px">×</button></span>';
     }).join('') + '<button type="button" class="btn" data-ess="login">+ персонаж</button><button type="button" class="btn" data-ess="sync"' + (st.busy ? ' disabled' : '') + '>' + (st.busy ? 'Обновляю…' : 'Обновить') + '</button></div>' +
       (E.msg ? '<div class="small" role="status" style="margin-bottom:6px">' + esc(E.msg) + '</div>' : '') +
-      '<div class="small muted" style="margin-bottom:8px">«Баунти» выше — из логов (ваша доля сразу за каждого NPC). ESS — доля из банка ESS, приходит раз в ~3 часа; если банк украли, выплаты не будет. «Ожидаемая ESS» — сколько должно прийти со следующей выплатой: заданная доля от баунти по логам с последней выплаты ESS (пришла выплата — считается с нуля; журнал кошелька обновляется раз в ~30 минут). Без подключённого кошелька — доля от баунти за выбранный период. ' +
+      '<div class="small muted" style="margin-bottom:8px">«Баунти» выше — из логов (ваша доля сразу за каждого NPC). ESS — доля из банка ESS, приходит раз в ~3 часа; если банк украли, выплаты не будет. «Ожидаемая ESS» — сколько должно прийти со следующей выплатой: заданная доля от баунти по логам с последней выплаты ESS (выплаты идут раз в 2 ч 45 мин по сетке от последней выплаты из кошелька — счётчик обнуляется на каждой границе сразу, не дожидаясь журнала; когда выплата появится в журнале, сетка подстраивается под неё). Без подключённого кошелька — доля от баунти за выбранный период. ' +
       '«Выплачено CCP» — что реально пришло на кошелёк как баунти (раз в 20 минут): так видно, сходится ли лог с игрой. Журнал кошелька ESI отдаёт за 30 дней — приложение копит историю у себя.</div>';
     if (!d) h += '<p class="small muted">Загружаю выплаты…</p>';
     else if (!d.payments.length) h += '<p class="small muted">Выплат ESS за этот период нет' + (ELW.S.who ? ' у ' + esc(ELW.S.who) : '') + '.</p>';

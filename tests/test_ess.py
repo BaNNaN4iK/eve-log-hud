@@ -158,3 +158,13 @@ class TestPending(unittest.TestCase):
             last = w.last_ess()
             self.assertEqual(last["Ratter One"], {"t": 300, "amount": 7.0, "synced": 9})
             self.assertEqual(last["Alt"]["t"], 0)
+
+
+class TestGrid(unittest.TestCase):
+    def test_boundary_every_2h45(self):
+        a, p = 1_000_000, 2 * 3600 + 45 * 60
+        self.assertEqual(ess.ESS_PERIOD, p)
+        self.assertEqual(ess.ess_boundary(a, a + 100), a)                   # окно ещё идёт — от реальной выплаты
+        self.assertEqual(ess.ess_boundary(a, a + p), a + p)                 # граница — сброс сразу
+        self.assertEqual(ess.ess_boundary(a, a + 3 * p + 59), a + 3 * p)    # пустые окна сетку не сбивают
+        self.assertEqual(ess.ess_boundary(0, a), 0)                         # нет выплат — нет сетки

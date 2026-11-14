@@ -23,6 +23,7 @@ WALLET = "esi-wallet.read_character_wallet.v1"
 KINDS = {"ess_escrow_transfer": "ess", "bounty_prizes": "bounty", "bounty_prize": "bounty"}
 SYNC_S = 30 * 60                       # ESI кэширует журнал кошелька на час — чаще смысла нет
 KEEP_S = 400 * 86400
+ESS_PERIOD = 2 * 3600 + 45 * 60        # банк ESS выплачивает раз в 2 ч 45 мин — ровно, по сетке от прошлой выплаты
 
 
 def bounty_since(records: list, t: int, full: Callable[[str], Optional[dict]] = lambda rid: None) -> float:
@@ -39,6 +40,15 @@ def bounty_since(records: list, t: int, full: Callable[[str], Optional[dict]] = 
             pm = (full(r.get("id") or "") or {}).get("per_min") or []
         total += sum(row[4] for row in pm if len(row) > 4 and row[0] + 60 > t)
     return round(total, 2)
+
+
+def ess_boundary(anchor: int, now: float, period: int = ESS_PERIOD) -> int:
+    """Последняя граница сетки выплат не позже now: anchor + k × period (anchor — последняя выплата из кошелька).
+    Журнал кошелька запаздывает до часа и больше — по сетке счётчик сбрасывается сразу; когда выплата появится
+    в журнале, она станет новой опорой (сетка иногда сдвигается после перерывов)."""
+    if not anchor or now <= anchor:
+        return anchor
+    return int(anchor + (now - anchor) // period * period)
 
 
 def _iso(ts: str) -> int:
@@ -199,10 +209,12 @@ def setup(ctx) -> None:
             if not l["t"]:
                 out.append({"name": name, "last_t": 0, "last_amount": 0, "synced": l["synced"], "bounty": None})
                 continue
+            since = ess_boundary(l["t"], time.time())
             mine = [r for r in recs if r.get("who") == name]
-            b = bounty_since(mine, l["t"], w.history.get if w is not None else (lambda rid: None)) + \
-                bounty_since([s for s in live if s.get("who") == name], l["t"])
-            out.append({"name": name, "last_t": l["t"], "last_amount": l["amount"], "synced": l["synced"], "bounty": b})
+            b = bounty_since(mine, since, w.history.get if w is not None else (lambda rid: None)) + \
+                bounty_since([s for s in live if s.get("who") == name], since)
+            out.append({"name": name, "last_t": l["t"], "last_amount": l["amount"], "synced": l["synced"], "bounty": b,
+                        "since": since, "by_timer": since != l["t"], "next": since + ESS_PERIOD})
         return {"ok": True, "chars": out}
 
     def sync(body=None, qs=None):
