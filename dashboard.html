@@ -154,6 +154,7 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
 
   <div class="bar" role="group" aria-label="Фильтры">
     <div class="seg" id="periodSeg" role="group" aria-label="Период">
+      <button type="button" data-p="cur" title="Идущая сессия (если сейчас никто не играет — последняя)">Текущая сессия</button>
       <button type="button" data-p="today">Сегодня</button>
       <button type="button" data-p="d7">7 дней</button>
       <button type="button" data-p="d30">30 дней</button>
@@ -859,13 +860,30 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     var ids = {}; S.history.forEach(function (s) { ids[s.id] = 1; });
     return S.history.concat(live.filter(function (s) { return !ids[s.id]; }).map(function (s) { return Object.assign({ _live: true }, s); }));
   }
+  // «Текущая сессия»: идущие сессии (по выбранному персонажу); если сейчас ничего не идёт — последняя законченная
+  function currentSessions() {
+    var all = allSessions().filter(function (s) { return !S.who || s.who === S.who; });
+    var live = all.filter(function (s) { return s._live; });
+    if (live.length) return { list: live, live: true };
+    var last = null;
+    all.forEach(function (s) { if (!last || s.t1 > last.t1) last = s; });
+    return { list: last ? [last] : [], live: false };
+  }
   function range() {
+    if (S.period === 'cur') {
+      var c = currentSessions(), f = null, t = null;
+      c.list.forEach(function (s) { f = f === null ? s.t0 : Math.min(f, s.t0); t = t === null ? s.t1 : Math.max(t, s.t1); });
+      if (f === null) { f = nowTs(); t = f; }
+      t = Math.max(t, f) + 1;
+      return { from: f, to: t, unit: 'hour', current: c };
+    }
     var all = S.history, minTs = null;
     all.forEach(function (s) { if (minTs === null || s.t0 < minTs) minTs = s.t0; });
     return L.periodRange(S.period, nowTs(), { from: S.from, to: S.to, minTs: minTs });
   }
   function selected() {
     var r = range();
+    if (r.current) return { range: r, list: r.current.list };
     var list = L.filterSessions(allSessions(), { from: r.from, to: r.to, who: S.who });
     return { range: r, list: list };
   }
@@ -875,7 +893,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     renderControls();
     var sel = selected(), T = L.sumSessions(sel.list);
     var r = sel.range;
-    $('periodLabel').textContent = L.fmtDateFull(r.from) + ' — ' + L.fmtDateFull(r.to - 1) + (S.who ? ' · ' + S.who : '') + ' · сессий: ' + T.n;
+    $('periodLabel').textContent = r.current
+      ? (r.current.list.length ? (r.current.live ? 'идёт сейчас, с ' + L.fmtTime(r.from) : 'сейчас ничего не идёт — последняя сессия ' + L.fmtDateTime(r.from) + ' — ' + L.fmtTime(r.to - 1)) : 'сессий ещё нет') +
+        (S.who ? ' · ' + S.who : '') + (T.n > 1 ? ' · сессий: ' + T.n : '')
+      : L.fmtDateFull(r.from) + ' — ' + L.fmtDateFull(r.to - 1) + (S.who ? ' · ' + S.who : '') + ' · сессий: ' + T.n;
     if (S.tab === 'overview') renderOverview(sel, T);
     if (S.tab === 'combat') renderCombat(T);
     if (S.tab === 'mining') renderMining(sel, T);
