@@ -1,0 +1,84 @@
+{
+ "v": 1,
+ "items": [
+  {
+   "mineral": 35,
+   "level": 3,
+   "systems": [
+    "JL-ZUQ",
+    "FIZU-X",
+    "1GH-48"
+   ]
+  },
+  {
+   "mineral": 36,
+   "level": 3,
+   "systems": [
+    "WU9-ZR",
+    "JAWX-R",
+    "GTB-O4"
+   ]
+  },
+  {
+   "mineral": 37,
+   "level": 3,
+   "systems": [
+    "89-JPE",
+    "F-5WYK"
+   ]
+  },
+  {
+   "mineral": 38,
+   "level": 3,
+   "systems": [
+    "ETO-OT"
+   ]
+  },
+  {
+   "mineral": 34,
+   "level": 2,
+   "systems": [
+    "9IZ-HU",
+    "E-WMT7"
+   ]
+  },
+  {
+   "mineral": 35,
+   "level": 2,
+   "systems": [
+    "OTJ-4W"
+   ]
+  },
+  {
+   "mineral": 37,
+   "level": 2,
+   "systems": [
+    "KPI-OW"
+   ]
+  },
+  {
+   "mineral": 38,
+   "level": 2,
+   "systems": [
+    "2AUL-X",
+    "OTJ-4W"
+   ]
+  },
+  {
+   "mineral": 39,
+   "level": 2,
+   "systems": [
+    "X-KHRZ",
+    "XT-1E0"
+   ]
+  },
+  {
+   "mineral": 40,
+   "level": 2,
+   "systems": [
+    "C6C-K9",
+    "4-QDIX"
+   ]
+  }
+ ]
+}

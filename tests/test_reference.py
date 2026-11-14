@@ -115,6 +115,15 @@ class TestUpgrades(unittest.TestCase):
         self.assertEqual(v[1]["systems"][0]["region"], "Catch")
         self.assertLess(v[1]["systems"][0]["sec"], 0)
 
+    def test_default_list_shipped(self):
+        import json, os
+        d = json.load(open(os.path.join(os.path.dirname(ref.__file__), "reference_upgrades.json"), encoding="utf-8"))
+        sy = ref.load_systems()
+        self.assertTrue(d["items"])
+        for x in d["items"]:                                                     # всё встроенное — настоящие системы и минералы
+            self.assertIn(x["mineral"], ref.UPGRADE_MINERALS)
+            self.assertTrue(all(n.upper() in sy for n in x["systems"]), x)
+
     def test_errors(self):
         sy = ref.load_systems()
         _, err = ref.upgrades_parse("Unobtanium 2: Jita\nIsogen 2: NOPE-1", sy)

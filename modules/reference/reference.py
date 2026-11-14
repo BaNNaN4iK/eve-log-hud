@@ -301,7 +301,7 @@ def load_systems(path: Optional[str] = None) -> Dict[str, list]:
 
 
 def upgrades_parse(text: str, systems: Optional[Dict[str, list]] = None) -> Tuple[List[dict], List[str]]:
-    """Текст «Pyerite 3: HED-GP, 4-07MU» (строка на массив) → список массивов и список ошибок."""
+    """Текст «Pyerite 3: JL-ZUQ, FIZU-X» (строка на массив) → список массивов и список ошибок."""
     alias = {}
     for mid, (en, ru, _) in UPGRADE_MINERALS.items():
         alias[en.lower()] = alias[ru.lower()] = mid
@@ -312,7 +312,7 @@ def upgrades_parse(text: str, systems: Optional[Dict[str, list]] = None) -> Tupl
         m = _UPG_LINE.match(line)
         mid = alias.get(m.group(1).strip().lower()) if m else None
         if mid is None:
-            errors.append(f"строка {n}: не понял «{line.strip()[:60]}» — нужно «Минерал уровень: системы», например «Pyerite 3: HED-GP, 4-07MU»")
+            errors.append(f"строка {n}: не понял «{line.strip()[:60]}» — нужно «Минерал уровень: системы», например «Pyerite 3: JL-ZUQ, FIZU-X»")
             continue
         names = []
         for tok in re.split(r"[\s,;]+", m.group(3)):
@@ -580,19 +580,23 @@ def setup(ctx) -> None:
     sysd: Dict[str, list] = {}
 
     def upg_load() -> dict:
-        try:
-            with open(upg_path, encoding="utf-8") as f:
-                d = json.load(f)
-            return d if isinstance(d, dict) else {}
-        except (OSError, ValueError):
-            return {}
+        """Свой список (в данных программы), а если его нет — список по умолчанию из модуля (reference_upgrades.json)."""
+        for path in (upg_path, os.path.join(HERE, "reference_upgrades.json")):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict):
+                    return dict(d, default=path != upg_path)
+            except (OSError, ValueError):
+                continue
+        return {}
 
     def upgrades(qs):
         if not sysd:
             sysd.update(load_systems())
         d = upg_load()
         items = d.get("items") or []
-        return {"ok": True, "items": upgrades_view(items, sysd, ore_table(data)["ores"]), "text": upgrades_text(items), "updated": d.get("updated"),
+        return {"ok": True, "items": upgrades_view(items, sysd, ore_table(data)["ores"]), "text": upgrades_text(items), "updated": d.get("updated"), "default": bool(d.get("default")),
                 "minerals": [[k, v[0], v[1]] for k, v in UPGRADE_MINERALS.items()]}
 
     def upgrades_save(body, qs=None):
