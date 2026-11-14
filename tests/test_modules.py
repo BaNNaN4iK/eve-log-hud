@@ -145,6 +145,16 @@ class TestModules(unittest.TestCase):
         self.assertFalse(self.req(port, "/api/modules/set", "POST", {"id": "hello"})[1]["ok"])
         with open(os.path.join(self.td.data, "config.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["modules"], {"hello": False})
+        # первый запуск: окно выбора модулей
+        self.assertTrue(self.req(port, "/api/modules")[1]["first_run"])
+        r = self.req(port, "/api/modules/setup", "POST", {"enabled": {"hello": True, "sleepy": True, "ghost": True}})[1]
+        self.assertEqual((r["ok"], r["restart"]), (True, True))                  # sleepy был выключен — нужен перезапуск
+        with open(os.path.join(self.td.data, "config.json"), encoding="utf-8") as f:
+            c = json.load(f)
+        self.assertEqual((c["modules"], c["modules_setup"]), ({"hello": True, "sleepy": True}, True))
+        self.assertFalse(self.req(port, "/api/modules")[1]["first_run"])
+        r = self.req(port, "/api/modules/setup", "POST", {"skip": True, "enabled": {"hello": False}})[1]
+        self.assertEqual((r["ok"], r["restart"]), (True, False))                 # «оставить как есть» — ничего не меняет
         self.assertTrue(self.req(port, "/api/restart", "POST")[1]["ok"])
         self.assertTrue(os.path.exists(os.path.join(self.td.data, "stop.flag")))   # трекер остановится, приложение поднимет снова
 

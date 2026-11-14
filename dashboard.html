@@ -313,6 +313,20 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
   <footer id="footer"></footer>
 </div>
 
+<dialog id="modSetup" aria-labelledby="msTitle" style="width:min(720px,calc(100vw - 16px))">
+  <div class="dlg-head"><h2 id="msTitle">Какие модули включить?</h2></div>
+  <div class="dlg-body" style="padding:12px 14px">
+    <p class="small" style="margin:0 0 10px">Это первый запуск. Отметьте, чем будете пользоваться, — остальное не будет загружаться и мешать.
+      Передумать можно в любой момент: вкладка «Модули».</p>
+    <div id="msList"></div>
+    <div class="controls" style="margin-top:12px">
+      <button type="button" class="btn primary" id="msSave">Включить выбранные</button>
+      <button type="button" class="btn" id="msAll">Отметить все</button>
+      <button type="button" class="btn" id="msSkip">Оставить как есть</button>
+      <span class="small muted" id="msMsg" role="status" aria-live="polite"></span>
+    </div>
+  </div>
+</dialog>
 <dialog id="dlg" aria-labelledby="dlgTitle">
   <div class="dlg-head"><h2 id="dlgTitle">Сессия</h2><button type="button" class="btn" id="dlgClose">Закрыть</button></div>
   <div class="dlg-body" id="dlgBody"></div>
@@ -1454,6 +1468,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     return api('/api/modules').then(function (j) {
       if (j._status !== 200 || !j.ok) { MODS = []; return; }
       MODS = j.modules || [];
+      if (j.first_run && !CFG.base) setTimeout(function () { showModSetup(); }, 300);
       var scripts = [];
       MODS.forEach(function (m) {
         if (!m.enabled || (m.kind === 'tracker' && !m.loaded)) return;
@@ -1651,6 +1666,51 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       renderModules();
     }, function () { UPD_BUSY = false; MOD.msg = 'Нет связи с трекером.'; renderModules(); });
   }
+  // ---------- первый запуск: выбор модулей ----------
+  function modPost(path, body) {
+    return api(path, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  }
+  function restartAndReload(onFail) {                       // перезапуск трекера и перезагрузка страницы, когда он поднимется
+    modPost('/api/restart').then(function () {
+      var seenDown = false, tries = 0;
+      var wait = setInterval(function () {
+        tries++;
+        fetch(BASE + '/api/live', { cache: 'no-store' }).then(function (r) {
+          if (r.ok && seenDown) { clearInterval(wait); location.reload(); }
+        }, function () { seenDown = true; });
+        if (tries > 60) { clearInterval(wait); onFail(); }
+      }, 1000);
+    });
+  }
+  function showModSetup() {
+    var dlg = $('modSetup');
+    if (!dlg || dlg.open || !MODS.length) return;
+    $('msList').innerHTML = MODS.map(function (m) {
+      var d = String(m.description || ''), cut = d.search(/[.!?](\s|$)/);
+      var short = cut > 0 && cut < 220 ? d.slice(0, cut + 1) : (d.length > 220 ? d.slice(0, 217) + '…' : d);
+      return '<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 6px;border-top:1px solid var(--line);cursor:pointer">' +
+        '<input type="checkbox" data-ms="' + esc(m.id) + '"' + (m.enabled ? ' checked' : '') + ' style="margin-top:3px">' +
+        '<span><b>' + esc(m.name) + '</b><span class="small muted" style="display:block">' + esc(short) + '</span></span></label>';
+    }).join('');
+    $('msMsg').textContent = '';
+    try { dlg.showModal(); } catch (e) { dlg.setAttribute('open', ''); }
+  }
+  $('modSetup').addEventListener('cancel', function (e) { e.preventDefault(); });   // Esc не закрывает: нужно выбрать
+  $('modSetup').addEventListener('click', function (e) {
+    var id = e.target.id;
+    if (id === 'msAll') { document.querySelectorAll('#msList [data-ms]').forEach(function (c) { c.checked = true; }); return; }
+    if (id !== 'msSave' && id !== 'msSkip') return;
+    var body = { skip: id === 'msSkip', enabled: {} };
+    document.querySelectorAll('#msList [data-ms]').forEach(function (c) { body.enabled[c.getAttribute('data-ms')] = c.checked; });
+    $('msSave').disabled = $('msSkip').disabled = true;
+    modPost('/api/modules/setup', body).then(function (j) {
+      $('msMsg').textContent = j.message || '';
+      if (!j.ok) { $('msSave').disabled = $('msSkip').disabled = false; return; }
+      if (!j.restart) { $('modSetup').close(); return; }
+      restartAndReload(function () { $('msMsg').textContent = 'Трекер не поднялся сам — запустите приложение заново.'; });
+    }, function () { $('msMsg').textContent = 'Нет связи с трекером.'; $('msSave').disabled = $('msSkip').disabled = false; });
+  });
+
   $('view-modules').addEventListener('click', function (e) {
     var ub = e.target.closest && e.target.closest('button[data-upd]');
     if (ub) { updInstall({ id: ub.getAttribute('data-upd') }); return; }

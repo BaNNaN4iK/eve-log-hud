@@ -233,6 +233,30 @@ def find(root: str, mid: str, cfg: Optional[dict] = None) -> Optional[Module]:
     return None
 
 
+def _read_user(config_path: str) -> dict:
+    try:
+        with open(config_path, encoding="utf-8-sig") as f:
+            user = json.load(f)
+        return user if isinstance(user, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def first_run(config_path: str) -> bool:
+    """Модули ещё ни разу не выбирали (окно выбора при первом запуске)."""
+    return not _read_user(config_path).get("modules_setup")
+
+
+def save_setup(config_path: str, choice: Dict[str, bool], write_json: Callable) -> None:
+    """Выбор при первом запуске: включённые и выключенные модули + отметка, что выбор сделан."""
+    user = _read_user(config_path)
+    chosen = user.get("modules") if isinstance(user.get("modules"), dict) else {}
+    chosen.update({k: bool(v) for k, v in choice.items()})
+    user["modules"] = chosen
+    user["modules_setup"] = True
+    write_json(config_path, user)
+
+
 def set_enabled(config_path: str, mid: str, enabled: bool, write_json: Callable) -> None:
     """Запомнить выбор в config.json (вступает в силу после перезапуска)."""
     try:

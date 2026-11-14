@@ -1774,6 +1774,18 @@ class App:
         modkit.set_enabled(os.path.join(self.data_dir, "config.json"), mid, body["enabled"], atomic_write_json)
         return {"ok": True, "message": "Сохранено. Изменение вступит в силу после перезапуска.", "restart": True}
 
+    def setup_modules(self, body) -> dict:
+        """Первый запуск: какие модули включить. {"enabled": {"id": bool, ...}}; {"skip": true} — оставить как есть."""
+        if not isinstance(body, dict):
+            return {"ok": False, "message": "Неверный запрос"}
+        ids = {m.id: m.enabled for m in self.modules}
+        raw = body.get("enabled") if isinstance(body.get("enabled"), dict) else {}
+        choice = {} if body.get("skip") else {k: bool(v) for k, v in raw.items() if k in ids}
+        modkit.save_setup(os.path.join(self.data_dir, "config.json"), choice, atomic_write_json)
+        changed = any(ids[k] != v for k, v in choice.items())
+        return {"ok": True, "restart": changed,
+                "message": "Сохранено. Перезапускаю, чтобы включить выбранное…" if changed else "Сохранено."}
+
     def restart(self) -> dict:
         """Перезапуск трекера: в приложении его сразу поднимает значок в трее; без него — запустите снова сами."""
         try:
@@ -1975,7 +1987,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(*app.updates("status"))
             if path == "/api/modules":
                 return self._json(200, {"ok": True, "modules": [m.info() for m in app.modules],
-                                        "dir": modkit.modules_dir(SCRIPT_DIR)})
+                                        "dir": modkit.modules_dir(SCRIPT_DIR),
+                                        "first_run": modkit.first_run(os.path.join(app.data_dir, "config.json"))})
             m = re.match(r"^/modules/([a-z][a-z0-9_]{1,31})/([A-Za-z0-9_\-]+\.(js|css|png|svg))$", path)
             if m:
                 return self._module_file(m.group(1), m.group(2))
@@ -2035,6 +2048,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = None
         if u.path == "/api/modules/set":
             return self._json(200, self.app.set_module(body))
+        if u.path == "/api/modules/setup":
+            return self._json(200, self.app.setup_modules(body))
         if u.path == "/api/restart":
             return self._json(200, self.app.restart())
         if u.path == "/api/settings/logs":
