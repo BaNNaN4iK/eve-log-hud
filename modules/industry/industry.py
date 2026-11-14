@@ -81,7 +81,13 @@ DEFAULTS = {
     "market": "jita", "buy_mode": "sell", "sell_mode": "sell", "sales_tax": 3.6, "broker": 1.5,
     "comp_me": 10, "comp_te": 20, "build": [],
     "inv_sci": 4, "inv_enc": 4,
+    "haul_rate": 0, "haul_reactions": True,
 }
+PLAN_MODES = ("full", "buy", "haul")    # полный цикл · покупаю компоненты · оптимально по объёму перевозки
+
+
+def plan_mode(x) -> str:
+    return x if x in PLAN_MODES else "full"
 
 
 def clean_settings(raw: Optional[dict]) -> dict:
@@ -105,6 +111,10 @@ def clean_settings(raw: Optional[dict]) -> dict:
     num("comp_te", 0, 20, lambda x: int(float(x)))
     for k in ("industry", "adv_industry", "reactions", "inv_sci", "inv_enc"):
         num(k, 0, 5, lambda x: int(float(x)))
+    num("haul_rate", 0.0, 1e6)
+    if s["haul_rate"] is None:
+        s["haul_rate"] = 0
+    s["haul_reactions"] = s["haul_reactions"] not in (False, 0, "0", "false", "")
     for k, hi in (("cost_index", 100.0), ("facility_tax", 50.0), ("scc", 20.0), ("sales_tax", 20.0), ("broker", 20.0)):
         num(k, 0.0, hi)
     for k in ("facility_tax", "scc", "sales_tax", "broker"):
@@ -499,6 +509,87 @@ def invention_chance(base: float, s: dict) -> float:
     return min(1.0, base * (1 + 2 * s["inv_sci"] / 30 + s["inv_enc"] / 40))
 
 
+def haul_choice(calc: "Calculator", top: Dict[int, int], s: dict, now: float, prices: Optional[dict] = None) -> Tuple[set, Dict[int, dict]]:
+    """Что строить на месте, а что везти готовым, чтобы везти меньше.
+
+    Для каждого промежуточного предмета (компонент по оригиналу чертежа, реакция — если можно) снизу вверх сравниваем
+    «цену» штуки: готовой — её объём (м³), построенной на месте — объём материалов на неё (с учётом ME и бонусов сооружения,
+    материалы — тоже по лучшему варианту). Если задана стоимость перевозки (ISK за м³), сравниваем деньги: цена на рынке +
+    перевозка готового против цены материалов + их перевозка. Строим, только если выходит меньше; при равенстве — покупаем.
+    Возвращает: что строить, и по каждому рассмотренному предмету — объёмы штуки готовой и материалами."""
+    data, bps = calc.data, calc.data["bp"]
+    types = data["types"]
+    react = bool(s.get("haul_reactions", True)) and s["security"] != "high"
+    rate = float(s.get("haul_rate") or 0)
+
+    def can_build(t):
+        bp = bps.get(str(t))
+        return bool(bp) and (bp[6] if len(bp) > 6 else "bpo") == "bpo" and (bp[1] == "m" or (bp[1] == "r" and react))
+
+    # какие предметы вообще встречаются в дереве (для цен)
+    seen, stack = set(), list(top)
+    while stack:
+        t = stack.pop()
+        if t in seen:
+            continue
+        seen.add(t)
+        if t in top or can_build(t):
+            stack += [m for m, _ in bps[str(t)][4]] if str(t) in bps else []
+    if rate > 0 and prices is None:
+        prices = calc.prices(seen, s["market"], now)
+    use_isk = rate > 0 and bool(prices)
+
+    def vol(t):
+        return float((types.get(str(t)) or [0, 0, 0, 0])[3] or 0)
+
+    def buy_score(t):
+        if not use_isk:
+            return vol(t)
+        return ((prices.get(t) or {}).get(s["buy_mode"]) or 0) + rate * vol(t)
+
+    memo: Dict[int, Tuple[float, float]] = {}                  # предмет → (оценка штуки, объём штуки при лучшем выборе)
+    info: Dict[int, dict] = {}
+
+    def per_unit_mats(t):
+        bp = bps[str(t)]
+        mult = bonuses(dict(s, me=s["comp_me"], te=s["comp_te"]), bp[1], True)["mat"]
+        return [(m, q * mult / bp[3]) for m, q in bp[4]]
+
+    def unit(t, path, depth):
+        if t in memo:
+            return memo[t]
+        best = (buy_score(t), vol(t))
+        if can_build(t) and t not in path and depth < MAX_DEPTH:
+            sc = v = 0.0
+            for m, q in per_unit_mats(t):
+                ms, mv = unit(m, path | {t}, depth + 1)
+                sc += q * ms
+                v += q * mv
+            build = sc < best[0] - 1e-9
+            info[t] = {"unit_vol": vol(t), "build_vol": v, "unit_score": best[0], "build_score": sc, "build": build}
+            if build:
+                best = (sc, v)
+        memo[t] = best
+        return best
+
+    for t in top:                                              # продукты строим всегда — решаем за их материалы
+        if str(t) in bps:
+            for m, _ in per_unit_mats(t):
+                unit(m, frozenset({t}), 1)
+    # строим то, до чего доходит цепочка «строим» от продуктов
+    hb, stack = set(), [t for t in top if str(t) in bps]
+    reach = set()
+    while stack:
+        t = stack.pop()
+        for m, _ in bps[str(t)][4]:
+            if m in info and m not in reach:
+                reach.add(m)
+                if info[m]["build"] and m not in top:
+                    hb.add(m)
+                    stack.append(m)
+    return hb, {t: dict(info[t], isk=use_isk) for t in reach}
+
+
 def plan_order(calc: "Calculator", items: List[Tuple[int, int]], s: dict, mode: str = "full", now: Optional[float] = None,
                price_ids: Optional[set] = None, _prices: Optional[dict] = None) -> dict:
     """Заказ из нескольких продуктов. mode="full" — всё, что строится по чертежу, строим сами (компоненты, реакции,
@@ -512,8 +603,10 @@ def plan_order(calc: "Calculator", items: List[Tuple[int, int]], s: dict, mode: 
         if str(tid) in bps and qty > 0:
             top[tid] = top.get(tid, 0) + int(qty)
 
+    hb, haul = (haul_choice(calc, top, s, now, _prices) if mode == "haul" else (set(), {}))
+
     def buildable(t):
-        return str(t) in bps and (t in top or mode == "full")
+        return str(t) in bps and (t in top or mode == "full" or t in hb)
 
     # граф: кто из строящегося что потребляет (чтобы общий компонент считался один раз, после всех потребителей)
     seen, stack, consumers = set(), list(top), defaultdict_int()
@@ -645,8 +738,19 @@ def plan_order(calc: "Calculator", items: List[Tuple[int, int]], s: dict, mode: 
     spend = buy_total + job_total + inv_total
     cost = spend - left_total
     profit = revenue - cost if have else None
+    choices = []
+    for t, x in haul.items():                                  # «купить готовым или строить на месте» — по каждому компоненту
+        job = next((j for j in jobs if j["type_id"] == t), None)
+        q = job["need"] if job else buy.get(t, 0)
+        if not q:
+            continue
+        choices.append({"type_id": t, "name": calc.name(t), "kind": bps[str(t)][1], "qty": q, "build": t in hb,
+                        "ready_vol": x["unit_vol"] * q, "mats_vol": x["build_vol"] * q,
+                        "saved_vol": abs(x["unit_vol"] - x["build_vol"]) * q,
+                        "saved_isk": abs(x["unit_score"] - x["build_score"]) * q if x["isk"] else None})
+    choices.sort(key=lambda r: (not r["build"], -r["saved_vol"]))
     return {"top": top, "jobs": jobs, "invention": inv_rows, "shopping": shopping, "leftovers": leftovers, "products": products,
-            "prices": have, "no_price": no_price, "mode": mode,
+            "prices": have, "no_price": no_price, "mode": mode, "choices": choices if mode == "haul" else None,
             "totals": {"buy": buy_total if have else None, "jobs": job_total, "invention": inv_total, "spend": spend if have else None,
                        "leftovers": left_total if have else None, "cost": cost if have else None, "revenue": revenue if have else None,
                        "profit": profit, "roi": round(profit * 100 / cost, 1) if profit is not None and cost else None,
@@ -674,6 +778,10 @@ def plan_with_products(calc: "Calculator", items: List[Tuple[int, int]], s: dict
         p["margin"] = round(p["profit"] * 100 / p["net"], 1) if p["profit"] is not None and p["net"] else None
         p["roi"] = round(p["profit"] * 100 / t["cost"], 1) if p["profit"] is not None and t["cost"] else None
         p["chain_time"] = t["time"]
+    if mode == "haul":                                          # с чем сравнивать: объём закупки в двух других режимах
+        whole["haul"] = {m: plan_order(calc, items, s, m, now, _prices={})["totals"]["volume"] for m in ("full", "buy")}
+        whole["haul"].update(rate=s.get("haul_rate") or 0, isk=bool(s.get("haul_rate")) and whole["prices"],
+                             reactions=bool(s.get("haul_reactions", True)) and s["security"] != "high")
     return whole
 
 
@@ -1142,7 +1250,7 @@ class Projects:
              "log": [[int(now), "Черновик расчёта" if draft else ("План закреплён" if kind == "plan" else "Чертёж закреплён")]]}
         if kind == "plan":
             p["items"] = [{"id": t, "qty": q} for t, q in items]
-            p["mode"] = "buy" if mode == "buy" else "full"
+            p["mode"] = plan_mode(mode)
         with self.lock:
             if draft:
                 self.items = [x for x in self.items if not x.get("draft")]
@@ -1277,12 +1385,18 @@ class Projects:
         if p.get("kind") == "plan":
             tops = [(int(i["id"]), int(i["qty"])) for i in p.get("items") or []]
             build = set() if not full and p.get("mode") == "buy" else None
+            if not full and p.get("mode") == "haul":
+                top_d: Dict[int, int] = {}
+                for t, q in tops:
+                    if str(t) in bp:
+                        top_d[t] = top_d.get(t, 0) + q
+                build = haul_choice(self.calc, top_d, s, time.time())[0] | set(top_d)
         else:
             tops = [(int(p["type_id"]), s["runs"] * bp[str(p["type_id"])][3])]
             build = set(s["build"])
         if full or build is None:
             build = (build or set()) | {int(k) for k, v in bp.items() if v[1] == "m"}
-            if p.get("kind") == "plan" and p.get("mode") != "buy" and not full:
+            if p.get("kind") == "plan" and p.get("mode") == "full" and not full:
                 build |= {int(k) for k in bp}                       # план «полный цикл» — и реакции
 
         def mat(m):
@@ -2147,7 +2261,7 @@ def setup(ctx) -> None:
             return {"ok": False, "message": "Добавьте в план хотя бы один продукт."}
         s = clean_settings(dict(load_settings()["settings"], **(body.get("settings") or {})) if isinstance(body.get("settings"), dict)
                            else load_settings()["settings"])
-        mode = "buy" if body.get("mode") == "buy" else "full"
+        mode = plan_mode(body.get("mode"))
         try:
             res = plan_with_products(calc, items, s, mode)
         except Exception as e:
@@ -2174,7 +2288,7 @@ def setup(ctx) -> None:
             if not items:
                 return {"ok": False, "message": "В плане нет продуктов."}
             cur.insert(0, {"name": name, "items": [{"id": t, "qty": q} for t, q in items],
-                           "mode": "buy" if body.get("mode") == "buy" else "full", "updated": int(time.time())})
+                           "mode": plan_mode(body.get("mode")), "updated": int(time.time())})
         try:
             ctx.core.atomic_write_json(plans_path, cur[:100])
         except Exception as e:
@@ -2225,7 +2339,7 @@ def setup(ctx) -> None:
                 if items is None and not isinstance(body.get("product"), str):
                     return {"ok": False, "message": "Укажите, что строить."}
                 p = projects.create(str(body.get("product") or ""), st, str(body.get("name") or ""), draft=action == "draft",
-                                    items=items, mode="buy" if body.get("mode") == "buy" else "full")
+                                    items=items, mode=plan_mode(body.get("mode")))
                 return {"ok": True, "id": p["id"], "message": ("Расчёт: " if p["draft"] else "Закреплено: ") + p["name"]}
             p = projects.get(str(body.get("id") or ""))
             if p is None:
@@ -2258,7 +2372,7 @@ def setup(ctx) -> None:
             elif action == "settings":
                 new = body.get("settings") if isinstance(body.get("settings"), dict) else {}
                 projects.update_settings(p, new, str(body["name"]) if isinstance(body.get("name"), str) else None)
-                if body.get("mode") in ("full", "buy") and p.get("kind") == "plan":
+                if body.get("mode") in PLAN_MODES and p.get("kind") == "plan":
                     p["mode"] = body["mode"]
                     projects.save()
                 if body.get("as_default"):                       # где строим, навыки, рынок — и для новых расчётов

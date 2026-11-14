@@ -451,8 +451,9 @@
     // настройки и журнал
     h += fold('set', 'Настройки расчёта <span class="n">— прогоны, ME/TE, где строим, навыки, рынок</span>', '<div id="pjSetBox">' +
       '<div class="in-grid"><label class="small muted">Название<input id="pjName" maxlength="80" value="' + esc(p.name) + '"></label>' +
-      (c.kind === 'plan' ? '<label class="small muted">Как строим' + ELW_INDUSTRY.help('pl_mode') + '<select id="pjMode"><option value="full"' + (c.mode !== 'buy' ? ' selected' : '') + '>полный цикл</option>' +
-        '<option value="buy"' + (c.mode === 'buy' ? ' selected' : '') + '>покупаю компоненты</option></select></label>' : '') + '</div>' +
+      (c.kind === 'plan' ? '<label class="small muted">Как строим' + ELW_INDUSTRY.help('pl_mode') + '<select id="pjMode"><option value="full"' + (c.mode !== 'buy' && c.mode !== 'haul' ? ' selected' : '') + '>полный цикл</option>' +
+        '<option value="buy"' + (c.mode === 'buy' ? ' selected' : '') + '>покупаю компоненты</option>' +
+        '<option value="haul"' + (c.mode === 'haul' ? ' selected' : '') + '>оптимально по объёму</option></select></label>' : '') + '</div>' +
       ELW_INDUSTRY.form('pjS', c.kind === 'plan' ? { runs: false, me: false } : {}) +
       '<div class="controls" style="margin-top:8px"><button type="button" class="btn primary" id="pjSaveSet">Пересчитать</button>' +
       '<label class="small muted"><input type="checkbox" id="pjAsDef"> и сделать настройками по умолчанию (кроме прогонов и ME/TE)</label><span style="flex:1"></span>' +

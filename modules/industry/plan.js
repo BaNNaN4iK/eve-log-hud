@@ -10,11 +10,12 @@
   try {
     var draft = JSON.parse(localStorage.getItem('elw.industry.plan') || '{}');
     if (Array.isArray(draft.items)) P.items = draft.items;
-    if (draft.mode === 'buy') P.mode = 'buy';
+    if (draft.mode === 'buy' || draft.mode === 'haul') P.mode = draft.mode;
+    P.rate = +draft.rate || 0; P.react = draft.react !== false;
     if (draft.name) P.name = draft.name;
     if (draft.stock) P.stock = String(draft.stock);
   } catch (e) { }
-  function remember() { try { localStorage.setItem('elw.industry.plan', JSON.stringify({ items: P.items, mode: P.mode, name: P.name, stock: P.stock })); } catch (e) { } }
+  function remember() { try { localStorage.setItem('elw.industry.plan', JSON.stringify({ items: P.items, mode: P.mode, name: P.name, stock: P.stock, rate: P.rate, react: P.react })); } catch (e) { } }
   function isk(v) { return v === null || v === undefined ? '—' : L.fmtCompact(v); }
   function pct(v) { return v === null || v === undefined ? '—' : String(v).replace('.', ',') + '%'; }
   function cls(v) { return v > 0 ? 'in-good' : v < 0 ? 'in-bad' : ''; }
@@ -169,7 +170,11 @@
   }
   function info(id) { var c = (P.catalog || []).filter(function (r) { return r[0] === id; })[0]; return c ? { name: c[1], cat: c[2], src: c[3], kind: c[4] } : { name: String(id) }; }
   function drawModes() {
-    $('plModes').innerHTML = chip('mode', 'full', 'Полный цикл', P.mode === 'full') + chip('mode', 'buy', 'Покупаю компоненты', P.mode === 'buy');
+    $('plModes').innerHTML = chip('mode', 'full', 'Полный цикл', P.mode === 'full') + chip('mode', 'buy', 'Покупаю компоненты', P.mode === 'buy') +
+      chip('mode', 'haul', 'Оптимально по объёму', P.mode === 'haul') +
+      (P.mode === 'haul' ? '<label class="small muted" title="Сколько стоит довезти 1 м³ до места постройки. 0 — сравнивать только объём; больше 0 — сравнивать деньги: цена на рынке плюс перевозка">Перевозка, ISK за м³ ' +
+        '<input id="plRate" value="' + (P.rate || 0) + '" inputmode="decimal" style="width:6em;text-align:right;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 6px"></label>' +
+        '<label class="small muted" title="Есть ли на месте сооружение для реакций (Athanor или Tatara). В хайсеке реакций нет"><input type="checkbox" id="plReact"' + (P.react !== false ? ' checked' : '') + '> реакции на месте</label>' : '');
     var se = (ELW_INDUSTRY.settings && ELW_INDUSTRY.settings()) || {};
     drawStock();
     $('plMarket').innerHTML = 'цены: ' + esc({ jita: 'Jita 4-4', amarr: 'Amarr', dodixie: 'Dodixie', rens: 'Rens', hek: 'Hek' }[se.market] || 'Jita 4-4') +
@@ -255,6 +260,7 @@
     $('plMsg').textContent = 'Считаю…';
     var settings = ELW_INDUSTRY.settings ? ELW_INDUSTRY.settings() : {};
     delete settings.build;
+    settings.haul_rate = P.rate || 0; settings.haul_reactions = P.react !== false;
     api('/api/industry/plan', { method: 'POST', headers: POST, body: JSON.stringify({ items: P.items, mode: P.mode, settings: settings }) }).then(function (j) {
       P.busy = false;
       if (P.again) { P.again = false; calc(); return; }
@@ -276,13 +282,14 @@
     if (!r) { box.innerHTML = ''; return; }
     var t = r.totals;
     var line = function (k, v, c, note) { return '<dt' + (c ? ' class="' + c + '"' : '') + '>' + k + (note ? '<div class="in-sub">' + note + '</div>' : '') + '</dt><dd' + (c ? ' class="' + c + '"' : '') + '>' + v + '</dd>'; };
-    var h = '<section class="panel"><h2>Итог плана <span class="muted small">' + (r.mode === 'full' ? 'полный цикл' : 'компоненты покупаются') + ' · ' + esc(r.market_name) + '</span></h2>';
+    var h = '<section class="panel"><h2>Итог плана <span class="muted small">' + ({ full: 'полный цикл', buy: 'компоненты покупаются', haul: 'оптимально по объёму перевозки' }[r.mode] || '') + ' · ' + esc(r.market_name) + '</span></h2>';
     var sum = '<div class="tiles">' +
       '<div class="tile"><div class="k">Прибыль</div><div class="v ' + cls(t.profit) + '">' + esc(isk(t.profit)) + '</div><div class="s">ROI ' + esc(pct(t.roi)) + '</div></div>' +
       '<div class="tile"><div class="k">Себестоимость</div><div class="v">' + esc(isk(t.cost)) + '</div><div class="s">с учётом остатков</div></div>' +
       '<div class="tile"><div class="k">Выручка</div><div class="v">' + esc(isk(t.revenue)) + '</div><div class="s">после налогов</div></div>' +
       '<div class="tile"><div class="k">Время работ</div><div class="v">' + esc(L.fmtDur(Math.round(t.time))) + '</div><div class="s">все подряд, в одну линию</div></div>' +
-      '<div class="tile"><div class="k">Закупка</div><div class="v">' + esc(L.fmtInt(t.volume)) + ' м³</div><div class="s">' + r.shopping.length + ' позиций</div></div></div>' +
+      '<div class="tile"><div class="k">' + (r.haul ? 'Везти' : 'Закупка') + '</div><div class="v">' + esc(L.fmtInt(t.volume)) + ' м³</div><div class="s">' +
+        (r.haul ? 'полный цикл ' + esc(L.fmtInt(r.haul.full)) + ' · компоненты ' + esc(L.fmtInt(r.haul.buy)) : r.shopping.length + ' позиций') + '</div></div></div>' +
       '<div class="in-cmp"><div style="--c:var(--accent)"><h3>Во что обходится</h3><dl>' +
       line('Закупка материалов', isk(t.buy)) + line('Запуск работ', isk(t.jobs), '', r.jobs.length + ' работ') +
       line('Изобретение', isk(t.invention), '', 'датакоры и запуски') + line('Всего потрачено', isk(t.spend), 'tot') +
@@ -293,6 +300,7 @@
       line('Прибыль', '<span class="' + cls(t.profit) + '">' + isk(t.profit) + '</span>', 'tot') + line('ROI', pct(t.roi)) + '</dl></div></div>';
     h += sec('sum', 'Итог: прибыль <span class="n">' + isk(t.profit) + ' ISK · ROI ' + pct(t.roi) + '</span>', sum, true);
     if (r.no_price && r.no_price.length) h += '<p class="small" style="color:var(--warn)">Нет цены на рынке: ' + esc(r.no_price.join(', ')) + '</p>';
+    if (r.choices) h += drawHaul(r);
 
     // работы
     var jobs = function (kind) { return r.jobs.filter(function (j) { return j.kind === kind; }); };
@@ -359,6 +367,25 @@
     }
     box.innerHTML = h + '</section>';
   }
+  function drawHaul(r) {
+    var c = r.choices, hl = r.haul || {}, nb = c.filter(function (x) { return x.build; }).length;
+    var best = Math.min(hl.full, hl.buy), save = best - r.totals.volume;
+    var note = '<p class="small" style="margin:4px 0 8px">Для каждого компонента сравнивается объём: купить готовым и привезти — или привезти материалы и построить на месте ' +
+      '(материалы — тоже по лучшему варианту, с учётом ME компонентов и бонусов сооружения). ' +
+      (hl.isk ? 'Задана перевозка <b>' + esc(L.fmtInt(hl.rate)) + ' ISK за м³</b> — сравниваются деньги: цена на рынке плюс перевозка. ' : 'Сравнивается только объём; чтобы учесть ещё и цены, задайте стоимость перевозки за м³. ') +
+      (hl.reactions ? 'Реакции можно делать на месте.' : 'Реакции не строятся на месте (хайсек или выключено) — их продукты покупаются.') +
+      ' Итог: везти <b>' + esc(L.fmtInt(r.totals.volume)) + ' м³</b>' + (save > 0.5 ? ' — на ' + esc(L.fmtInt(save)) + ' м³ меньше, чем в лучшем из двух других режимов.' : '.') + '</p>';
+    if (!c.length) return sec('haul', 'Купить или строить на месте <span class="n">— выбирать нечего</span>', note + '<p class="small muted">В этом плане нет компонентов, которые можно построить по оригиналу чертежа.</p>', true);
+    var tb = table('plHaul', c, [
+      { k: 'name', t: 'Компонент', l: 1, f: function (x) { return ico(x.type_id) + ELW_INDUSTRY.cp(x.name) + (x.kind === 'r' ? ' <span class="in-sub">реакция</span>' : ''); } },
+      { k: 'qty', t: 'Нужно', f: function (x) { return esc(L.fmtInt(Math.round(x.qty))); } },
+      { k: 'ready_vol', t: 'Готовым, м³', f: function (x) { return '<span class="' + (x.build ? '' : 'in-good') + '">' + esc(L.fmtInt(x.ready_vol)) + '</span>'; } },
+      { k: 'mats_vol', t: 'Материалами, м³', f: function (x) { return '<span class="' + (x.build ? 'in-good' : '') + '">' + esc(L.fmtInt(x.mats_vol)) + '</span>'; } },
+      { k: 'build', t: 'Решение', l: 1, f: function (x) { return x.build ? '<b class="in-good">строить на месте</b>' : '<b>купить готовым</b>'; } },
+      { k: hl.isk ? 'saved_isk' : 'saved_vol', t: hl.isk ? 'Выгода, ISK' : 'Экономия, м³', f: function (x) { return esc(hl.isk ? isk(x.saved_isk) : L.fmtInt(x.saved_vol)); } }
+    ], {});
+    return sec('haul', 'Купить или строить на месте <span class="n">— строить ' + nb + ', купить ' + (c.length - nb) + ' · везти ' + L.fmtInt(r.totals.volume) + ' м³</span>', note + tb, true);
+  }
   function nameOf(id) { var x = (P.res && P.res.shopping || []).filter(function (s) { return s.type_id === id; })[0]; return x ? x.name : String(id); }
 
   document.addEventListener('click', function (e) {
@@ -381,6 +408,8 @@
 
   window.ELW_INDUSTRY = window.ELW_INDUSTRY || {};
   document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'plRate') { P.rate = Math.max(0, parseFloat(String(e.target.value).replace(',', '.').replace(/\s/g, '')) || 0); remember(); if (P.items.length) calc(); }
+    if (e.target && e.target.id === 'plReact') { P.react = e.target.checked; remember(); if (P.items.length) calc(); }
     if (e.target && e.target.id === 'plStock') { P.stock = e.target.value || null; remember(); loadStock(); }
   });
   document.addEventListener('click', function (e) {

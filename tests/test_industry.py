@@ -714,3 +714,47 @@ class TestStock(unittest.TestCase):
             self.assertEqual(again.items(60003760)[35], 500)
         finally:
             td.cleanup()
+
+
+class TestHaul(unittest.TestCase):
+    """«Оптимально по объёму»: что купить готовым, а что строить на месте, чтобы везти меньше."""
+
+    def data(self):
+        return {"bp": {"500": [501, "m", 100, 1, [[600, 2], [700, 1], [800, 10]], 10, "bpo"],   # продукт
+                       "600": [601, "m", 100, 1, [[34, 100]], 10, "bpo"],      # A: готовый 10 м³, материалы 1 м³ → строить
+                       "700": [701, "m", 100, 1, [[35, 50]], 10, "bpo"],       # B: готовый 0,1 м³, материалы 0,5 м³ → купить
+                       "800": [801, "r", 100, 100, [[36, 10]], 10, "bpo"]},    # C: реакция, 0,001 м³ материалов на штуку 1 м³
+                "types": {"500": ["X", 1, 1, 5.0], "600": ["A", 1, 17, 10.0], "700": ["B", 1, 17, 0.1], "800": ["C", 1, 4, 1.0],
+                          "34": ["Tritanium", 18, 4, 0.01], "35": ["Pyerite", 18, 4, 0.01], "36": ["Mexallon", 18, 4, 0.01]},
+                "groups": {}, "index": {}}
+
+    def test_volume(self):
+        c = ind.Calculator(None, self.data())
+        s = ind.clean_settings({"comp_me": 0, "security": "null"})
+        hb, info = ind.haul_choice(c, {500: 1}, s, 0)
+        self.assertEqual(hb, {600, 800})
+        self.assertAlmostEqual(info[600]["build_vol"], 1.0)
+        r = ind.plan_with_products(c, [(500, 1)], s, "haul", 0)
+        self.assertEqual({j["type_id"] for j in r["jobs"]}, {500, 600, 800})
+        self.assertAlmostEqual(r["totals"]["volume"], 2 + 0.1 + 0.1)              # 200 Tritanium, B готовым, 10 Mexallon
+        self.assertLess(r["totals"]["volume"], min(r["haul"]["full"], r["haul"]["buy"]))
+        ch = {x["type_id"]: x for x in r["choices"]}
+        self.assertEqual((ch[600]["build"], ch[700]["build"], ch[800]["build"]), (True, False, True))
+        self.assertAlmostEqual(ch[600]["saved_vol"], 2 * 9.0)
+        self.assertEqual(ind.plan_order(c, [(500, 1)], s, "full")["choices"], None)
+
+    def test_reactions_off_in_highsec_or_by_choice(self):
+        c = ind.Calculator(None, self.data())
+        self.assertEqual(ind.haul_choice(c, {500: 1}, ind.clean_settings({"security": "high"}), 0)[0], {600})
+        self.assertEqual(ind.haul_choice(c, {500: 1}, ind.clean_settings({"security": "null", "haul_reactions": "0"}), 0)[0], {600})
+
+    def test_isk_with_haul_rate(self):
+        c = ind.Calculator(None, self.data())
+        s = ind.clean_settings({"comp_me": 0, "security": "null", "haul_rate": "1"})
+        pr = {600: {"sell": 10}, 700: {"sell": 1}, 800: {"sell": 1}, 34: {"sell": 1000}, 35: {"sell": 1}, 36: {"sell": 1}}
+        hb, info = ind.haul_choice(c, {500: 1}, s, 0, pr)
+        self.assertNotIn(600, hb)                                                  # A дешевле купить, даже с перевозкой
+        self.assertTrue(info[600]["isk"])
+        self.assertEqual(ind.clean_settings({"haul_rate": "-5"})["haul_rate"], 0)
+        self.assertEqual(ind.plan_mode("haul"), "haul")
+        self.assertEqual(ind.plan_mode("x"), "full")
