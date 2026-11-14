@@ -202,7 +202,7 @@
       'Уровень массива — 1, 2 или 3: чем выше, тем богаче аномалии. Нажмите на систему — имя скопируется, на руду — откроется её карточка в таблице руды.</p></section>';
     if (R.upEdit) {
       h += '<section class="panel"><h2>Изменить список</h2><p class="small muted" style="margin:4px 0">Одна строка — один массив: «Минерал уровень: системы через запятую». ' +
-        'Минерал можно по-английски или по-русски; безопасность рядом с системой («-0.46») можно оставить — она пропускается. Пример: <code>Pyerite 3: JL-ZUQ, FIZU-X, 1GH-48</code></p>' +
+        'Минерал можно по-английски или по-русски; безопасность рядом с системой («-0.46») можно оставить — она пропускается. Пример: <code>Pyerite 3: HED-GP, 4-07MU, Jita</code></p>' +
         '<textarea id="rfUpText" rows="12" spellcheck="false" style="width:100%;box-sizing:border-box;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:13px/1.5 ui-monospace,Consolas,monospace">' + esc(u.text || '') + '</textarea>' +
         (R.upErr ? '<p class="in-bad small" style="margin:6px 0">' + esc(R.upErr) + '</p>' : '') +
         '<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="btn" data-rf-upsave="1">Сохранить</button><button type="button" class="btn" data-rf-upcancel="1">Отмена</button></div>' +

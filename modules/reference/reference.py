@@ -301,7 +301,7 @@ def load_systems(path: Optional[str] = None) -> Dict[str, list]:
 
 
 def upgrades_parse(text: str, systems: Optional[Dict[str, list]] = None) -> Tuple[List[dict], List[str]]:
-    """Текст «Pyerite 3: JL-ZUQ, FIZU-X» (строка на массив) → список массивов и список ошибок."""
+    """Текст «Pyerite 3: HED-GP, 4-07MU» (строка на массив) → список массивов и список ошибок."""
     alias = {}
     for mid, (en, ru, _) in UPGRADE_MINERALS.items():
         alias[en.lower()] = alias[ru.lower()] = mid
@@ -312,7 +312,7 @@ def upgrades_parse(text: str, systems: Optional[Dict[str, list]] = None) -> Tupl
         m = _UPG_LINE.match(line)
         mid = alias.get(m.group(1).strip().lower()) if m else None
         if mid is None:
-            errors.append(f"строка {n}: не понял «{line.strip()[:60]}» — нужно «Минерал уровень: системы», например «Pyerite 3: JL-ZUQ, FIZU-X»")
+            errors.append(f"строка {n}: не понял «{line.strip()[:60]}» — нужно «Минерал уровень: системы», например «Pyerite 3: HED-GP, 4-07MU»")
             continue
         names = []
         for tok in re.split(r"[\s,;]+", m.group(3)):

@@ -421,7 +421,7 @@ def split_actor(name: str) -> Tuple[str, str, str]:
 
 
 def actor_from_slashes(s: str) -> str:
-    """'Pioneer // NeutPilot NEUTS /' -> 'NeutPilot NEUTS (Pioneer)'; 'Damavik [PROB] [SC.ST] [Pilot]' -> 'Pilot (Damavik)'."""
+    """'Pioneer // NeutPilot NEUTS /' -> 'NeutPilot NEUTS (Pioneer)'; 'Damavik [TICK] [CORP] [Pilot]' -> 'Pilot (Damavik)'."""
     s = s.strip()
     m = BRACKETS_RE.match(s)                                   # корабль [альянс] [корпорация] [пилот]; у дронов пилот = корабль
     if m:

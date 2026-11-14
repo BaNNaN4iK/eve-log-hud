@@ -188,12 +188,12 @@ class TestRealLines(unittest.TestCase):
                          ("rep_out", 95, "FleetMate 3200 (Brutix Navy Issue)", "Small Ancillary Remote Shield Booster"))
 
     def test_rep_out_armor_and_cap_in(self):
-        e = C("54 единиц запаса прочности брони отремонтировано Damavik [PROB] [SC.ST] [BaNNNaN4iK] - - Small Remote Armor Repairer I")
+        e = C("54 единиц запаса прочности брони отремонтировано Damavik [TICK] [CORP] [Pilot One] - - Small Remote Armor Repairer I")
         self.assertEqual((e.kind, e.data["amount"], e.data["layer"], e.data["target"], e.data["module"]),
-                         ("rep_out", 54, "броня", "BaNNNaN4iK (Damavik)", "Small Remote Armor Repairer I"))
-        e = C("49 единиц запаса прочности брони отремонтировано Navitas // BaNNaN4iK PROB / - Small Remote Armor Repairer I")
-        self.assertEqual(e.data["target"], "BaNNaN4iK PROB (Navitas)")
-        e = C("0 единиц запаса прочности брони отремонтировано Hobgoblin I [PROB] [SC.ST] [Hobgoblin I] - - Small Remote Armor Repairer I")
+                         ("rep_out", 54, "броня", "Pilot One (Damavik)", "Small Remote Armor Repairer I"))
+        e = C("49 единиц запаса прочности брони отремонтировано Navitas // Pilot Two TICK / - Small Remote Armor Repairer I")
+        self.assertEqual(e.data["target"], "Pilot Two TICK (Navitas)")
+        e = C("0 единиц запаса прочности брони отремонтировано Hobgoblin I [TICK] [CORP] [Hobgoblin I] - - Small Remote Armor Repairer I")
         self.assertEqual((e.kind, e.data["amount"], e.data["target"]), ("rep_out", 0, "Hobgoblin I"))   # дрон: пилот = корабль
         e = C("17 единиц запаса энергии накопителя получено от Basilisk // Kotofei4 X.I.X / - Large Radiative Scoped Remote Capacitor Transmitter")
         self.assertEqual((e.kind, e.data["amount"], e.data["source"], e.data["module"]),
