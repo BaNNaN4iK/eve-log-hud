@@ -196,4 +196,17 @@ test('DST: day buckets stay on local midnight', () => {
   assert(n >= 23 && n <= 25);
 });
 
+test('текущая сессия: поминутные интервалы по per_min', () => {
+  const t0 = ts(2026, 11, 15, 15, 2);
+  const s = mk(t0, 'A', { dur: 1500, bounty: 600, ore_total: 0,
+    per_min: [[t0 - 120, 0, 0, 0, 100], [t0 + 180, 0, 0, 0, 200], [t0 + 900, 0, 0, 0, 300]] });
+  const r = { from: t0, to: t0 + 1501, unit: 'min', step: 300 };
+  const b = L.buckets([s], r, 'bounty', {});
+  assert.strictEqual(b[0].label, '15:00');
+  assert.strictEqual(b.reduce((a, x) => a + x.value, 0), 600);
+  eq(b.map(x => x.value).slice(0, 4), [100, 200, 0, 300]);                 // минуты 15:00, 15:05, 15:17 → интервалы по 5 мин
+  const light = Object.assign({}, s); delete light.per_min;
+  eq(L.buckets([light], r, 'bounty', {})[0].value, 600);                     // без per_min — всё в начало
+});
+
 console.log(`dashboard logic: ${passed} tests passed (TZ=${process.env.TZ || 'system'})`);

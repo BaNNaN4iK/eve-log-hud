@@ -250,14 +250,14 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
       </section>
       <section class="panel"><h2>Итого</h2><div class="tiles" id="mTiles"></div></section>
       <section class="panel"><h2>Руда по типам</h2><div id="mOre"></div></section>
-      <section class="panel"><h2>По дням <span class="small muted">м³</span></h2><div class="chart" id="mChart"></div></section>
+      <section class="panel"><h2><span class="chart-title">По дням</span> <span class="small muted">м³</span></h2><div class="chart" id="mChart"></div></section>
       <section class="panel"><h2>По системам</h2><div id="mSystems"></div></section>
     </div>
 
     <div role="tabpanel" id="view-bounty" aria-labelledby="tab-bounty" class="hidden">
       <section class="panel"><h2>Итого</h2><div class="tiles" id="bTiles"></div></section>
       <div id="bExtra"></div>
-      <section class="panel"><h2>По дням</h2><div class="chart" id="bChart"></div></section>
+      <section class="panel"><h2 class="chart-title">По дням</h2><div class="chart" id="bChart"></div></section>
       <div class="grid2 gridgap">
         <section class="panel"><h2>По системам</h2><div id="bSystems"></div></section>
         <section class="panel"><h2>Лучшие сессии</h2><div id="bTop"></div></section>
@@ -416,6 +416,10 @@ var L = (function () {
   }
   function bucketStarts(r) {
     var out = [], t, guard = 0;
+    if (r.unit === 'min') {                                    // текущая сессия: шаг r.step секунд
+      for (t = r.from - r.from % r.step; t < r.to && ++guard < 2000; t += r.step) out.push(t);
+      return out;
+    }
     if (r.unit === 'hour') {
       var d0 = new Date(r.from * 1000);
       for (var h = 0; ; h++) {
@@ -440,6 +444,7 @@ var L = (function () {
   }
   function bucketLabel(t, unit) {
     var d = new Date(t * 1000);
+    if (unit === 'min') return pad(d.getHours()) + ':' + pad(d.getMinutes());
     if (unit === 'hour') return pad(d.getHours());
     if (unit === 'month') return MONTHS[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2);
     return fmtDate(t);
@@ -467,8 +472,34 @@ var L = (function () {
     }
   }
   /** Столбцы графика: все интервалы периода, включая нулевые; сессия относится к интервалу своего начала. */
+  // значение метрики за одну минуту из per_min [минута, урон, получено, руда, баунти]; руда в м³/ISK — доля от сессии
+  function minuteValue(s, row, metric, ctx) {
+    switch (metric) {
+      case 'out': return row[1] || 0;
+      case 'in': return row[2] || 0;
+      case 'ore': return row[3] || 0;
+      case 'bounty': return row[4] || 0;
+      case 'minutes': return 1;
+      case 'ore_m3': case 'ore_isk': return s.ore_total ? metricValue(s, metric, ctx) * (row[3] || 0) / s.ore_total : 0;
+      default: return 0;
+    }
+  }
   function buckets(list, range, metric, ctx) {
     var starts = bucketStarts(range), vals = starts.map(function () { return 0; });
+    var at = function (t) {
+      var lo = 0, hi = starts.length - 1;
+      while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (starts[mid] <= t) lo = mid; else hi = mid - 1; }
+      return lo;
+    };
+    if (range.unit === 'min' && starts.length) {               // поминутно: по per_min, иначе — всё в начало сессии
+      list.forEach(function (s) {
+        if (s.per_min && s.per_min.length) s.per_min.forEach(function (row) { if (row[0] >= starts[0] && row[0] < range.to) vals[at(row[0])] += minuteValue(s, row, metric, ctx); });
+        else if (s.t0 < range.to) vals[at(Math.max(s.t0, starts[0]))] += metricValue(s, metric, ctx);
+      });
+      return starts.map(function (t, i) {
+        return { start: t, end: i + 1 < starts.length ? starts[i + 1] : range.to, label: bucketLabel(t, range.unit), value: vals[i] };
+      });
+    }
     list.forEach(function (s) {
       if (s.t0 < range.from || s.t0 >= range.to || !starts.length) return;
       var lo = 0, hi = starts.length - 1;
@@ -884,12 +915,20 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
     return S.history.concat(live.filter(function (s) { return !ids[s.id]; }).map(function (s) { return Object.assign({ _live: true }, s); }));
   }
   // «Текущая сессия»: идущие сессии (по выбранному персонажу); если сейчас ничего не идёт — последняя законченная
+  var CUR_FULL = { id: null, rec: null };
   function currentSessions() {
     var all = allSessions().filter(function (s) { return !S.who || s.who === S.who; });
     var live = all.filter(function (s) { return s._live; });
     if (live.length) return { list: live, live: true };
     var last = null;
     all.forEach(function (s) { if (!last || s.t1 > last.t1) last = s; });
+    if (last && !last.per_min) {                               // в истории — без поминутных данных: догрузить запись
+      if (CUR_FULL.id === last.id && CUR_FULL.rec) last = CUR_FULL.rec;
+      else if (CUR_FULL.id !== last.id) {
+        CUR_FULL.id = last.id; CUR_FULL.rec = null;
+        api('/api/session?id=' + encodeURIComponent(last.id)).then(function (rec) { if (rec && rec.id === CUR_FULL.id) { CUR_FULL.rec = rec; render(); } });
+      }
+    }
     return { list: last ? [last] : [], live: false };
   }
   function range() {
@@ -898,7 +937,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       c.list.forEach(function (s) { f = f === null ? s.t0 : Math.min(f, s.t0); t = t === null ? s.t1 : Math.max(t, s.t1); });
       if (f === null) { f = nowTs(); t = f; }
       t = Math.max(t, f) + 1;
-      return { from: f, to: t, unit: 'hour', current: c };
+      var span = t - f, step = span <= 5400 ? 300 : span <= 4 * 3600 ? 600 : span <= 10 * 3600 ? 1800 : 3600;
+      return { from: f, to: t, unit: 'min', step: step, current: c };
     }
     var all = S.history, minTs = null;
     all.forEach(function (s) { if (minTs === null || s.t0 < minTs) minTs = s.t0; });
@@ -920,6 +960,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       ? (r.current.list.length ? (r.current.live ? 'идёт сейчас, с ' + L.fmtTime(r.from) : 'сейчас ничего не идёт — последняя сессия ' + L.fmtDateTime(r.from) + ' — ' + L.fmtTime(r.to - 1)) : 'сессий ещё нет') +
         (S.who ? ' · ' + S.who : '') + (T.n > 1 ? ' · сессий: ' + T.n : '')
       : L.fmtDateFull(r.from) + ' — ' + L.fmtDateFull(r.to - 1) + (S.who ? ' · ' + S.who : '') + ' · сессий: ' + T.n;
+    var stepTxt = r.unit === 'min' ? 'По времени — по ' + (r.step >= 3600 ? '1 ч' : r.step / 60 + ' мин') : r.unit === 'hour' ? 'По часам' : r.unit === 'day' ? 'По дням' : r.unit === 'week' ? 'По неделям' : 'По месяцам';
+    document.querySelectorAll('.chart-title').forEach(function (el) { el.textContent = stepTxt; });
     if (S.tab === 'overview') renderOverview(sel, T);
     if (S.tab === 'combat') renderCombat(T);
     if (S.tab === 'mining') renderMining(sel, T);
