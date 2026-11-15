@@ -262,6 +262,19 @@ class Shell:
                 self.set_overlay(True)                       # включили на вкладке «Модули» — без перезапуска приложения
             was = now
 
+    def quit_watch(self, stop: threading.Event):
+        """Сигнал закрыться (quit.flag): его пишет трекер, когда пользователь удаляет программу."""
+        flag = os.path.join(self.data, "quit.flag")
+        while not stop.wait(2):
+            if os.path.exists(flag):
+                try:
+                    os.remove(flag)
+                except OSError:
+                    pass
+                self.quit(getattr(self, "icon", None))
+                stop.set()
+                return
+
     def quit(self, icon=None, *_):
         for name in ("overlay", "window"):
             if self.alive(name):
@@ -282,6 +295,7 @@ class Shell:
             self.set_overlay(True)
         stop = threading.Event()
         threading.Thread(target=self.watchdog, args=(stop,), daemon=True).start()
+        threading.Thread(target=self.quit_watch, args=(stop,), daemon=True).start()
         try:
             import pystray
             from PIL import Image
@@ -295,7 +309,7 @@ class Shell:
             pystray.MenuItem("Папка с данными", self.open_data),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Выход", self.quit))
-        icon = pystray.Icon("EveLogHUD", image, APP_NAME, menu)
+        icon = self.icon = pystray.Icon("EveLogHUD", image, APP_NAME, menu)
         try:
             icon.run()
         except Exception as e:

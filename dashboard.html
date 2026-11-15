@@ -307,6 +307,15 @@ footer{margin-top:26px;color:var(--muted);font-size:12px}
         <div id="modList"></div>
         <div class="controls"><span class="small muted" id="modMsg" role="status" aria-live="polite"></span></div>
       </section>
+      <section class="panel"><h2>Удаление программы</h2>
+        <p class="small muted" style="margin-top:0">Программа закроется, её папка будет удалена. Ваши данные (история сессий, настройки, подключённые персонажи,
+          склад и выплаты) лежат отдельно — удалить их тоже или оставить на случай, если поставите программу снова.</p>
+        <div class="controls">
+          <label class="small"><input type="checkbox" id="unData"> удалить и мои данные</label>
+          <button type="button" class="btn" id="unGo" style="border-color:var(--bad);color:var(--bad)">Удалить программу</button>
+          <span class="small" id="unMsg" role="status" aria-live="polite"></span>
+        </div>
+      </section>
     </div>
   </main>
 
@@ -1666,6 +1675,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = L;
       renderModules();
     }, function () { UPD_BUSY = false; MOD.msg = 'Нет связи с трекером.'; renderModules(); });
   }
+  // ---------- удаление программы ----------
+  $('unGo').addEventListener('click', function () {
+    var data = $('unData').checked;
+    if (!confirm('Удалить EVE Log HUD с этого компьютера?' + (data ? '\n\nВместе с данными: история сессий, настройки, персонажи — их не вернуть.' : '\n\nВаши данные останутся.'))) return;
+    this.disabled = true;
+    api('/api/uninstall', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'uninstall', data: data }) })
+      .then(function (j) { $('unMsg').textContent = j.message || ''; if (!j.ok) $('unGo').disabled = false; },
+        function () { $('unMsg').textContent = 'Нет связи с трекером.'; $('unGo').disabled = false; });
+  });
+
   // ---------- первый запуск: выбор модулей ----------
   function modPost(path, body) {
     return api(path, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });

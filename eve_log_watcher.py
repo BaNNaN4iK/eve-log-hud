@@ -2052,6 +2052,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self.app.setup_modules(body))
         if u.path == "/api/restart":
             return self._json(200, self.app.restart())
+        if u.path == "/api/uninstall":
+            import uninstall
+            if not isinstance(body, dict) or body.get("confirm") != "uninstall":
+                return self._json(200, {"ok": False, "message": "Неверный запрос"})
+            ok, msg = uninstall.start(self.app.data_dir, bool(body.get("data")))
+            return self._json(200, {"ok": ok, "message": msg})
         if u.path == "/api/settings/logs":
             return self._json(200, self.app.logs_settings(body if body is not None else {}))
         if u.path == "/api/updates/check":
