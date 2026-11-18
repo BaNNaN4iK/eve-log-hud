@@ -78,6 +78,21 @@ for t, en, ru, g, c in ItemType.objects.filter(id__in=used).values_list("id", "n
     gids.add(g)
 groups = {str(g): ru or en for g, ru, en in ItemGroup.objects.filter(id__in=gids).values_list("id", "name_ru", "name_en")}
 cats = {str(c): ru or en for c, ru, en in ItemCategory.objects.filter(id__in={v[3] for v in types.values()}).values_list("id", "name_ru", "name_en")}
+# предметы новее загруженного SDE (только что вышли в игре) — название, группа и категория из ESI
+for t in sorted(set(used) - {int(k) for k in types}):
+    en, ru = esi(f"/universe/types/{t}/") or {}, esi(f"/universe/types/{t}/?language=ru") or {}
+    if not en:
+        continue
+    g = en.get("group_id")
+    grp = esi(f"/universe/groups/{g}/") if g else {}
+    grp_ru = esi(f"/universe/groups/{g}/?language=ru") if g else {}
+    c = (grp or {}).get("category_id")
+    types[str(t)] = [en.get("name") or str(t), ru.get("name") if ru.get("name") and ru.get("name") != en.get("name") else "", g, c]
+    if g and str(g) not in groups:
+        groups[str(g)] = (grp_ru or {}).get("name") or (grp or {}).get("name") or ""
+    if c and str(c) not in cats:
+        cat_ru = esi(f"/universe/categories/{c}/?language=ru") or {}
+        cats[str(c)] = cat_ru.get("name") or ""
 
 with open(OUT, "w", encoding="utf-8") as fh:
     json.dump({"v": 1, "built": datetime.date.today().isoformat(), "factions": factions, "offers": offers,

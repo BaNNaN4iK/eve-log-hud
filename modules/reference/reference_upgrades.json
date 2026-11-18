@@ -2,12 +2,18 @@
  "v": 1,
  "items": [
   {
+   "mineral": 34,
+   "level": 3,
+   "systems": [
+    "1GH-48"
+   ]
+  },
+  {
    "mineral": 35,
    "level": 3,
    "systems": [
     "JL-ZUQ",
-    "FIZU-X",
-    "1GH-48"
+    "FIZU-X"
    ]
   },
   {
